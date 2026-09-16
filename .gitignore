@@ -1,0 +1,11 @@
+/.stable_worldmodel
+/Clone_Deterministic_Environment
+/datasets
+/le-wm
+/temporal-straightening
+*.pth
+/checkpoints
+*.h5
+*.pt
+*.csv
+*.pyc

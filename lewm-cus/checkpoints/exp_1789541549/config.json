@@ -1,0 +1,110 @@
+{
+  "run_name": "smoketest",
+  "out_dir": "/home/world-models/lewm-cus/checkpoints",
+  "exp_id": "exp_1789541549",
+  "seed": 3072,
+  "device": "cuda",
+  "compile": false,
+  "data": {
+    "h5_path": "/home/world-models/.stable_worldmodel/datasets/ogbench/cube_single_expert.h5",
+    "frameskip": 5,
+    "history": 3,
+    "num_preds": 1,
+    "img_size": 224,
+    "obs_key": "observation",
+    "max_episodes": 40,
+    "val_episodes": 8,
+    "stats_path": null,
+    "stats_max_rows": 200000,
+    "rdcc_mb": 256
+  },
+  "model": {
+    "encoder": "mlp",
+    "vit_name": "vit_tiny_patch16_224",
+    "vit_pretrained": false,
+    "vit_pool": "cls",
+    "mlp_hidden": 512,
+    "embed_dim": 192,
+    "act_smooth_dim": 64,
+    "act_mlp_scale": 4,
+    "depth": 6,
+    "heads": 6,
+    "dim_head": 64,
+    "mlp_dim": 768,
+    "dropout": 0.1,
+    "use_projector": true,
+    "proj_hidden": 1024,
+    "proj_norm": "batch",
+    "cost": "final_mse"
+  },
+  "optim": {
+    "epochs": 5,
+    "batch_size": 64,
+    "lr": 0.0003,
+    "weight_decay": 0.001,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "warmup_epochs": 2.0,
+    "min_lr_scale": 0.01,
+    "grad_clip": 1.0,
+    "amp_dtype": "bf16",
+    "num_workers": 2,
+    "prefetch_factor": 4,
+    "persistent_workers": true,
+    "pin_memory": true,
+    "steps_per_epoch": 5,
+    "val_steps": 2,
+    "log_every": 20,
+    "ckpt_every": 1,
+    "select_metric": "pred_vs_static"
+  },
+  "loss": {
+    "sigreg_weight": 0.09,
+    "sigreg_knots": 17,
+    "sigreg_proj": 1024
+  },
+  "plan": {
+    "solver": "cem",
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "history_len": 1,
+    "warm_start": true,
+    "num_samples": 300,
+    "n_iters": 30,
+    "topk": 30,
+    "var_scale": 1.0,
+    "momentum": 0.1,
+    "min_std": 0.01,
+    "temperature": 1.0,
+    "chunk_size": 0
+  },
+  "eval": {
+    "num_eval": 50,
+    "goal_offset": 25,
+    "eval_budget": 50,
+    "min_goal_distance": 0.1,
+    "env_id": "swm/OGBCube-v0",
+    "env_type": "single",
+    "terminate_at_goal": true,
+    "save_video": true,
+    "video_fps": 10
+  },
+  "rollout": {
+    "num_sequences": 256,
+    "horizon": 10,
+    "batch_size": 32,
+    "retrieval_video": true,
+    "retrieval_bank": 2048,
+    "num_videos": 4
+  },
+  "wandb": {
+    "enabled": false,
+    "project": "lewm-cus",
+    "entity": null,
+    "name": null,
+    "mode": "online"
+  }
+}
