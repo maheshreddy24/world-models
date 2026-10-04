@@ -231,13 +231,12 @@ def recalibrate_bn(model, dataset, device, batches: int = 40, batch_size: int = 
                    num_workers: int = 4) -> int:
     """Re-estimate every BatchNorm's running statistics, with dropout off, on `dataset`.
 
-    The projector / predictor heads use BatchNorm. Their running statistics are
-    accumulated in training mode, with dropout on, so in eval mode (dropout off)
-    they no longer match the activations and the embeddings come out inflated:
-    on acrobot that made eval-mode prediction loss ~9x the train-mode loss on
-    the very same windows. Recomputing them as a plain average over
-    `batches` x `batch_size` training windows with the rest of the model in eval
-    mode makes eval mode agree with what the model actually learned.
+    The projector heads use BatchNorm, whose running statistics accumulate in
+    training mode with dropout on. In eval mode (dropout off) they no longer
+    match the activations and the embeddings come out inflated: on acrobot,
+    eval-mode prediction loss was ~9x the train-mode loss on the same windows.
+    Recomputing them as a plain average over `batches` x `batch_size` training
+    windows, with the rest of the model in eval mode, fixes that.
 
     Leaves the model in eval mode. Returns the number of BatchNorm layers reset
     (0: nothing to do).
@@ -274,11 +273,12 @@ def load_checkpoint(path: str | Path, map_location="cpu") -> dict:
     return torch.load(Path(path), map_location=map_location, weights_only=False)
 
 
-def load_model(path: str | Path, device: str = "cuda", override_cfg=None, random_init: bool = False):
-    """Rebuild a trained model straight from a checkpoint.
+def load_model(path: str | Path, device: str = "cuda", random_init: bool = False):
+    """Rebuild a trained model from a checkpoint (eval mode, no gradients).
 
-    `random_init` builds the same architecture but leaves its weights at their
-    fresh initialisation (the untrained-backbone baseline).
+    `random_init` builds the same architecture but keeps its fresh weights
+    (the untrained-backbone baseline). Eval-mode BatchNorm statistics still
+    need `recalibrate_bn` before the latents can be trusted.
 
     Returns:
         (model in eval mode on `device`, the config it was trained with)
@@ -287,37 +287,12 @@ def load_model(path: str | Path, device: str = "cuda", override_cfg=None, random
     from src.models import build_model
 
     ckpt = load_checkpoint(path, map_location="cpu")
-    cfg = override_cfg or Config.from_dict(ckpt["config"])
-    action_dim = ckpt.get("action_dim", 5)
-    state_dim = ckpt.get("state_dim")
-
-    model = build_model(cfg, action_dim=action_dim, state_dim=state_dim)
+    cfg = Config.from_dict(ckpt["config"])
+    model = build_model(cfg, action_dim=ckpt["action_dim"], state_dim=ckpt.get("state_dim"))
     if not random_init:
         model.load_state_dict(ckpt["model"])
     model.to(device).eval().requires_grad_(False)
     return model, cfg
-
-
-def load_policy(path: str | Path, device: str = "cuda"):
-    """Rebuild a diffusion policy (EMA weights) from a train_policy.py checkpoint.
-
-    Returns:
-        (policy in eval mode on `device`, the config it was trained with,
-         the world-model checkpoint it was trained on)
-    """
-    from config import Config
-    from src.planner import build_policy
-
-    ckpt = load_checkpoint(path, map_location="cpu")
-    # Policies saved before policy.goal / policy.proprio existed were
-    # conditioned on the goal latent and end-effector proprio, not today's defaults.
-    ckpt["config"]["policy"].setdefault("goal", "latent")
-    ckpt["config"]["policy"].setdefault("proprio", "ee")
-    cfg = Config.from_dict(ckpt["config"])
-    policy = build_policy(cfg, action_dim=ckpt["action_dim"], num_tokens=ckpt["num_tokens"])
-    policy.load_state_dict(ckpt["model"])
-    policy.to(device).eval().requires_grad_(False)
-    return policy, cfg, ckpt["lewm_ckpt"]
 
 
 # --------------------------------------------------------------------------- #
@@ -337,19 +312,3 @@ def save_video(path: str | Path, frames, fps: int = 10) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frames = np.asarray(frames, dtype=np.uint8)
     imageio.mimwrite(path, frames, fps=fps, macro_block_size=1, quality=8)
-
-
-def make_panel(*streams) -> np.ndarray:
-    """Tile several (T, H, W, 3) streams side by side into one video.
-
-    Shorter streams hold their last frame, so an episode that ends early still
-    lines up with the goal column next to it.
-    """
-    streams = [np.asarray(s, dtype=np.uint8) for s in streams]
-    length = max(len(s) for s in streams)
-    padded = []
-    for s in streams:
-        if len(s) < length:
-            s = np.concatenate([s, np.repeat(s[-1:], length - len(s), axis=0)])
-        padded.append(s)
-    return np.concatenate(padded, axis=2)

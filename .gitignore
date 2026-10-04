@@ -22,6 +22,9 @@ outputs/
 /videos
 *.mp4
 
+# --- files moved out of the codebase ---
+lewm-cus/temp/
+
 # --- python ---
 __pycache__/
 *.pyc

@@ -1,17 +1,18 @@
-"""Train LeWM on OGBench trajectories.
+"""Train the world model on one task's recording (`data.task`).
 
-    python train.py                              # pixels, default settings
-    python train.py --preset cube_oracle         # oracle-state ablation
-    python train.py --preset cube_dino           # frozen DINOv2 patches, no SIGReg (DINO-WM)
+    python train.py data.task=cartpole-swingup   # LeWM: ViT-tiny from pixels, with SIGReg
+    python train.py --preset dino                # DINO-WM: frozen DINOv2 patch features
+    python train.py --preset oracle              # MLP over the task's true state
     python train.py --preset debug               # 20-second smoke test
-    python train.py optim.lr=1e-4 model.depth=8  # override anything from config.py
-    python train.py --resume                     # continue the last checkpoint
+    python train.py optim.lr=1e-4 model.depth=8  # override anything in config.py
+    python train.py --resume --ckpt <run dir>/epoch_003.pt
 
-The objective is to predict the next embedding and, when the encoder is
-trainable, keep the embedding distribution Gaussian so it cannot collapse
-(`loss.use_sigreg`).  Watch `emb_std` — if it heads for zero the representation
-is collapsing and `loss.sigreg_weight` is too low; `pred_vs_static` below 1
-means the predictor beats assuming nothing moves.
+run.py drives this (plus the analyses) for one task.
+
+The objective is next-embedding prediction; with a trainable encoder, SIGReg
+keeps the embedding Gaussian so it cannot collapse. Watch `emb_std` (heading to
+zero means collapse) and `pred_vs_static` (below 1 means the predictor beats
+"nothing moves"). Each epoch writes `<run dir>/epoch_NNN.pt`.
 """
 
 from __future__ import annotations
@@ -229,7 +230,8 @@ def main(argv=None) -> None:
 
     # -- loop ------------------------------------------------------------- #
     try:
-        for epoch in range(start_epoch, cfg.optim.epochs):
+        last_epoch = cfg.optim.epochs - 1 if cfg.optim.stop_epoch is None else cfg.optim.stop_epoch
+        for epoch in range(start_epoch, last_epoch + 1):
             train_stats, global_step = run_epoch(
                 model, sigreg, train_loader, cfg, device, autocast,
                 optimizer=optimizer, scheduler=scheduler, logger=logger,

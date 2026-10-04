@@ -1,0 +1,43 @@
+{
+  "ckpt": "/home/world-models/lewm-cus/checkpoints/cartpole-swingup/vit/epoch_006.pt",
+  "task": "cartpole-swingup",
+  "random_init": true,
+  "features": 192,
+  "train_frames": 58734,
+  "heldout_frames": 13026,
+  "train_episodes": 234,
+  "heldout_episodes": 26,
+  "train": {
+    "cart_mae_cm": 42.02952194213867,
+    "cart_median_cm": 32.845149993896484,
+    "pole_mae_deg": 29.514598846435547,
+    "pole_median_deg": 16.280620574951172,
+    "r2_targets": [
+      0.6321121454238892,
+      0.8760369420051575,
+      0.1717889904975891
+    ]
+  },
+  "heldout": {
+    "cart_mae_cm": 42.12343978881836,
+    "cart_median_cm": 32.47898864746094,
+    "pole_mae_deg": 27.112443923950195,
+    "pole_median_deg": 14.080592155456543,
+    "r2_targets": [
+      0.6000851988792419,
+      0.8748067617416382,
+      0.18073374032974243
+    ]
+  },
+  "heldout_mean_guess": {
+    "cart_mae_cm": 68.57704162597656,
+    "cart_median_cm": 56.946311950683594,
+    "pole_mae_deg": 70.03247833251953,
+    "pole_median_deg": 57.0108757019043,
+    "r2_targets": [
+      -0.014835357666015625,
+      -0.05233001708984375,
+      -0.00032711029052734375
+    ]
+  }
+}

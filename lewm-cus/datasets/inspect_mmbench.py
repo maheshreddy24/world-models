@@ -165,7 +165,7 @@ def main():
     p.add_argument("--steps", type=int, default=8, help="frames per episode in the grid")
     p.add_argument("--size", type=int, default=112, help="frame side in the saved images")
     p.add_argument("--no-viz", action="store_true", help="stats only (skips the slow PNG decode)")
-    p.add_argument("--out", type=Path, default=Path("mmbench_viz"))
+    p.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "temp" / "mmbench_viz")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 

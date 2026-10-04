@@ -6,17 +6,16 @@ Experiments with latent world models for planning and control, built around
 **LeWM** (LeWorldModel) — a JEPA trained end-to-end from pixels with a
 next-embedding prediction loss plus the SIGReg anti-collapse regulariser.
 
-The main code lives in [`lewm-cus/`](lewm-cus/), a modular reimplementation of
-LeWM with MPC (CEM / MPPI) and diffusion-policy planners. See
+The main code lives in [`lewm-cus/`](lewm-cus/), a small reimplementation of
+LeWM. See
 [`lewm-cus/README.md`](lewm-cus/README.md) for layout, training and evaluation.
 
 ## Current experiments
 
-- **OGBench cube-single / cube-double** — closed-loop goal-image planning with MPC.
-- **OGBench scene-play** — diffusion-policy planner over seven mined tasks, with a state-based oracle world model for comparison.
-- **Acrobot swing-up (MMBench)** — double pendulum from pixels. Early probes read both joint angles linearly off the frozen latent (~1° / ~2° MAE held-out); open-loop rollouts and decoders under way.
-- **BallCatch** — small 2D pymunk catching task for probing what the latent encodes.
-- **Ablations** — pixel vs. oracle-state vs. frozen DINOv2 encoders, linear probes, latent readability.
+- **Acrobot swing-up (MMBench)**: double pendulum from pixels. A linear probe reads both joint angles off the frozen latent (~1° / ~2° MAE held-out); autoregressive rollouts are compared against copy-last, teacher-forced and shuffled-action baselines, with decoded videos.
+- **Encoders**: LeWM (ViT trained from scratch) vs. DINO-WM (frozen DINOv2 patches) vs. the true state.
+
+The earlier OGBench cube / scene and BallCatch pipelines were removed from the codebase; they are in git history (commit `7f5107c`).
 
 ## Setup
 

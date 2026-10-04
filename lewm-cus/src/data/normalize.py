@@ -1,10 +1,9 @@
 """Per-column z-score statistics.
 
 Actions and oracle states are whitened before they reach the model, which keeps
-the action encoder's inputs on the same scale as the latents and lets the
-planner optimise in a well-conditioned space.  Statistics are estimated once
-from a subsample of rows and cached next to the dataset, so training, planning
-and rollout all share the exact same numbers.
+the action encoder's inputs on a sane scale. Statistics are estimated once from
+a subsample of rows and cached next to the dataset, so training and every
+analysis script share the exact same numbers.
 """
 
 from __future__ import annotations

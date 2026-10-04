@@ -1,9 +1,8 @@
 """Pixel preprocessing.
 
-Kept deliberately small and torch-only: the dataloader workers turn uint8 HWC
-frames into normalised float CHW tensors, and the same function is reused at
-eval time on frames coming straight out of the simulator, so training and
-planning never disagree about preprocessing.
+uint8 HWC frames -> ImageNet-normalised float CHW tensors. The dataloader
+workers and every analysis script use the same function, so preprocessing never
+differs between training and evaluation.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Observation encoders: pixels -> latent, or oracle state -> latent.
+"""Observation encoders: pixels -> latent tokens, or oracle state -> latent token.
 
 Every encoder has the same contract on flattened batch*time input:
 
@@ -23,8 +23,7 @@ from .blocks import MLP
 class ViTEncoder(nn.Module):
     """timm Vision Transformer trunk, pooled to one vector per frame.
 
-    vit-tiny is ~5.5M parameters at width 192, which is what makes the whole
-    world model trainable on a single GPU.
+    vit-tiny is ~5.5M parameters at width 192.
 
     Args:
         name: any timm ViT (`vit_tiny_patch16_224`, `vit_small_patch16_224`, ...).
@@ -66,10 +65,9 @@ class ViTEncoder(nn.Module):
 class DinoEncoder(nn.Module):
     """Pretrained DINOv2 trunk, the observation model of DINO-WM.
 
-    DINO-WM keeps this frozen and predicts its patch features directly, which
-    is why it needs no anti-collapse term: the targets are fixed features, so
-    the loss has nothing to shrink.  Whether it is frozen is decided by
-    `model.freeze_encoder`, not here.
+    DINO-WM keeps it frozen and predicts its patch features directly; fixed
+    targets cannot collapse, so no anti-collapse term is needed. Freezing is
+    decided by `model.freeze_encoder`, not here.
 
     Args:
         name: torch.hub DINOv2 model (`dinov2_vits14` is 384 wide, `dinov2_vitb14` 768).
@@ -104,75 +102,36 @@ class DinoEncoder(nn.Module):
 
 
 class StateEncoder(nn.Module):
-    """MLP over a low-dimensional state, the oracle ablation.
+    """MLP over the low-dimensional oracle state: (N, S) -> (N, 1, D).
 
-    Same interface as the ViT, so swapping `model.encoder` between "vit" and
-    "mlp" is the only change needed to train on states instead of pixels.
-
-    `keep` selects the state columns the MLP reads (all of them when None), so
-    an ablation can hide part of the state while the data stays full-width.
+    Same interface as the pixel encoders, so `model.encoder=mlp` is the only
+    change needed to train on states instead of frames.
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int = 512, embed_dim: int = 192, keep: list[int] | None = None):
+    def __init__(self, input_dim: int, hidden_dim: int = 512, embed_dim: int = 192):
         super().__init__()
-        # Not persistent: rebuilt from the config, so older checkpoints still load.
-        self.register_buffer("keep", None if keep is None else torch.as_tensor(keep, dtype=torch.long), persistent=False)
-        self.net = MLP(input_dim if keep is None else len(keep), hidden_dim, embed_dim, norm="batch")
+        self.net = MLP(input_dim, hidden_dim, embed_dim, norm="batch")
         self.embed_dim = embed_dim
         self.num_patches = 1
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (N, input_dim) -> (N, 1, D)"""
-        if self.keep is not None:
-            x = x.index_select(-1, self.keep)
         return self.net(x.float()).unsqueeze(1)
 
 
 def build_encoder(cfg, input_dim: int | None = None) -> nn.Module:
-    """Instantiate the encoder named by `cfg.model.encoder`."""
+    """The encoder named by `cfg.model.encoder`; `input_dim` is the state width (mlp only)."""
     mcfg = cfg.model
     if mcfg.encoder == "vit":
-        enc = ViTEncoder(
-            name=mcfg.vit_name,
-            img_size=cfg.data.img_size,
-            pretrained=mcfg.vit_pretrained,
-            pool=mcfg.vit_pool,
-        )
+        enc = ViTEncoder(mcfg.vit_name, img_size=cfg.data.img_size, pretrained=mcfg.vit_pretrained, pool=mcfg.vit_pool)
     elif mcfg.encoder == "dino":
-        enc = DinoEncoder(name=mcfg.dino_name, tokens=mcfg.dino_tokens, img_size=mcfg.dino_img_size)
-    # this is for oracle setup, and its modular for n where n <= N (27)
+        enc = DinoEncoder(mcfg.dino_name, tokens=mcfg.dino_tokens, img_size=mcfg.dino_img_size)
     elif mcfg.encoder == "mlp":
         if input_dim is None:
             raise ValueError("the mlp encoder needs the state dimension")
-        keep = None
-        if mcfg.drop_obs:
-            from ..data.ogbench import kept_obs_dims
-
-            keep = kept_obs_dims(mcfg.drop_obs, input_dim)
-        enc = StateEncoder(input_dim, mcfg.mlp_hidden, mcfg.embed_dim, keep=keep)
+        enc = StateEncoder(input_dim, mcfg.mlp_hidden, mcfg.embed_dim)
     else:
         raise ValueError(f"unknown encoder {mcfg.encoder!r}")
 
     if enc.embed_dim != mcfg.embed_dim:
-        raise ValueError(
-            f"{mcfg.encoder} encoder width {enc.embed_dim} != model.embed_dim {mcfg.embed_dim}; "
-            f"set model.embed_dim={enc.embed_dim}"
-        )
+        raise ValueError(f"{mcfg.encoder} encoder width {enc.embed_dim} != model.embed_dim {mcfg.embed_dim}")
     return enc
-
-
-def build_oracle_encoder(cfg) -> StateEncoder | None:
-    """The oracle token read next to the pixels, or None without `model.oracle_obs`.
-
-    A `StateEncoder` over just the named groups of the cube state, giving one
-    extra token per frame: `(N, 28) -> (N, 1, D)`.  The world model appends it
-    to the image tokens, so a frame becomes P + 1 tokens and the predictor has
-    to predict the next state along with the next image.
-    """
-    mcfg = cfg.model
-    if not mcfg.oracle_obs:
-        return None
-    from ..data.ogbench import OBS_DIM, obs_group_dims
-
-    keep = obs_group_dims(mcfg.oracle_obs, OBS_DIM)
-    return StateEncoder(OBS_DIM, mcfg.oracle_hidden, mcfg.embed_dim, keep=keep)

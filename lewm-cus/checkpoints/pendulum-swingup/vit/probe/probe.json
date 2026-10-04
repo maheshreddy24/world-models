@@ -1,0 +1,34 @@
+{
+  "ckpt": "/home/world-models/lewm-cus/checkpoints/pendulum-swingup/vit/epoch_006.pt",
+  "task": "pendulum-swingup",
+  "random_init": false,
+  "features": 192,
+  "train_frames": 58734,
+  "heldout_frames": 13026,
+  "train_episodes": 234,
+  "heldout_episodes": 26,
+  "train": {
+    "pole_mae_deg": 0.2929839789867401,
+    "pole_median_deg": 0.21015127003192902,
+    "r2_targets": [
+      0.9996987581253052,
+      0.999861478805542
+    ]
+  },
+  "heldout": {
+    "pole_mae_deg": 0.31137382984161377,
+    "pole_median_deg": 0.22938507795333862,
+    "r2_targets": [
+      0.9997206330299377,
+      0.999858558177948
+    ]
+  },
+  "heldout_mean_guess": {
+    "pole_mae_deg": 69.2255859375,
+    "pole_median_deg": 50.119834899902344,
+    "r2_targets": [
+      -0.031146764755249023,
+      -3.421306610107422e-05
+    ]
+  }
+}
