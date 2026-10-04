@@ -1,15 +1,33 @@
-/.stable_worldmodel
-/Clone_Deterministic_Environment
-/datasets
+# --- upstream / third-party repos (cloned separately) ---
 /le-wm
 /temporal-straightening
-*.pth
-# /checkpoints
+/Clone_Deterministic_Environment
 
+# --- data ---
+/.stable_worldmodel
+/datasets
+/data
+*.h5
+*.csv
+
+# --- weights & run outputs ---
+*.pt
+*.pth
+*.pt.tmp
+checkpoints/exp_*/
+wandb/
+outputs/
+
+# --- media ---
 /videos
 *.mp4
-/checkpoints/exp_*
-*.h5
-*.pt
-*.csv
+
+# --- python ---
+__pycache__/
 *.pyc
+.ipynb_checkpoints/
+
+# --- editor / tooling ---
+.claude/
+.vscode/
+.DS_Store
