@@ -1,0 +1,11 @@
+{
+  "ckpt": "/home/world-models/lewm-cus/checkpoints/pendulum-swingup/vit/epoch_006.pt",
+  "res": 112,
+  "steps": 20000,
+  "latent_noise": 0.0,
+  "fg_weight": 10.0,
+  "train_frames": 58734,
+  "heldout_frames": 2626,
+  "heldout_psnr": 53.641563415527344,
+  "mean_frame_psnr": 30.22165870666504
+}

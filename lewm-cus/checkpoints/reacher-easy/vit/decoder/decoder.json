@@ -1,0 +1,11 @@
+{
+  "ckpt": "/home/world-models/lewm-cus/checkpoints/reacher-easy/vit/epoch_006.pt",
+  "res": 112,
+  "steps": 20000,
+  "latent_noise": 0.0,
+  "fg_weight": 10.0,
+  "train_frames": 58734,
+  "heldout_frames": 2626,
+  "heldout_psnr": 26.642112731933594,
+  "mean_frame_psnr": 23.45960235595703
+}

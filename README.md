@@ -12,8 +12,39 @@ LeWM. See
 
 ## Current experiments
 
-- **Acrobot swing-up (MMBench)**: double pendulum from pixels. A linear probe reads both joint angles off the frozen latent (~1° / ~2° MAE held-out); autoregressive rollouts are compared against copy-last, teacher-forced and shuffled-action baselines, with decoded videos.
-- **Encoders**: LeWM (ViT trained from scratch) vs. DINO-WM (frozen DINOv2 patches) vs. the true state.
+LeWM (ViT-tiny trained from scratch) on four DMControl tasks from MMBench2,
+one task at a time. For each: train the world model, fit a linear probe from
+the frozen latent to the true state, train a pixel decoder for visualisation,
+then measure how prediction error compounds over autoregressive rollouts
+against copy-last, teacher-forced and shuffled-action baselines.
+
+```bash
+cd lewm-cus && python run.py --task cartpole-swingup    # data -> train -> probe -> decoder -> rollout
+```
+
+| task | observation (true state) | action | probe reports |
+|---|---|---|---|
+| acrobot-swingup | 6: cos/sin of both links, 2 joint velocities | 1: torque at the **elbow** (the shoulder has no motor) | shoulder, elbow angle (deg) |
+| cartpole-swingup | 5: cart x, cos/sin pole, cart velocity, pole angular velocity | 1: horizontal **force on the cart** | cart position (cm), pole angle (deg) |
+| pendulum-swingup | 3: cos/sin pole, angular velocity | 1: **torque at the pivot**, too weak to lift the pole directly | pole angle (deg) |
+| reacher-easy | 6: shoulder, wrist angle; finger-to-target x, y; 2 joint velocities | 2: torques at the **shoulder** and **wrist** | shoulder, wrist (deg), to_target x, y (cm) |
+
+- **Data per task:** 260 training episodes of 501 rows (expert, mixed-small,
+  mixed-large, zeros), 26 held out; 40 more (val + test) never trained on.
+  224x224 frames; one row = 2 simulator steps; actions in [-1, 1].
+- **Model:** ViT-tiny/16 encoder (192-d class token) + BatchNorm MLP projectors +
+  6-layer causal transformer predictor (16 heads, MLP 2048), 18.1M parameters,
+  all trained jointly. Loss: next-latent MSE + 0.09 x SIGReg.
+- **Training:** frameskip 5, history 3 latent frames, batch 128, AdamW lr 5e-5
+  (weight decay 1e-3, 2 warmup epochs, cosine schedule of a 100-epoch run),
+  2000 steps per epoch, stopped after epoch 6; every analysis uses `epoch_006.pt`.
+- **Rollout ablation:** horizon 50 latent steps (250 rows) from every step of the
+  66 unseen episodes; latent MSE and probe error per horizon step.
+
+Full hyperparameter tables are in [`lewm-cus/README.md`](lewm-cus/README.md#hyperparameters).
+A first acrobot run (`checkpoints/double_pend_lwm`) read both joint angles off the
+frozen latent at ~1° / ~2° mean error on held-out episodes. DINO-WM (frozen DINOv2
+patches) and the true state are supported as encoder comparisons (`--preset dino`, `oracle`).
 
 The earlier OGBench cube / scene and BallCatch pipelines were removed from the codebase; they are in git history (commit `7f5107c`).
 

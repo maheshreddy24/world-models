@@ -78,20 +78,80 @@ python run.py --task pendulum-swingup --smoke           # few-minute end-to-end 
    (autoregressive minus teacher-forced). Videos: truth | decode(enc(truth)) |
    teacher-forced | autoregressive | shuffled.
 
-What the probe reads, per task:
-
-| task | probe targets | reported |
-|---|---|---|
-| acrobot-swingup | cos/sin of both links | shoulder, elbow angle (deg) |
-| cartpole-swingup | cart x, cos/sin pole | cart position (cm), pole angle (deg) |
-| pendulum-swingup | cos/sin pole | pole angle (deg) |
-| reacher-easy | cos/sin of both joints, finger-to-target x/y | shoulder, wrist (deg), to_target x/y (cm) |
-
 Every stage is also a plain script, e.g.
 `python train.py --preset vit data.task=cartpole-swingup` or
 `python ablations/probe.py --ckpt checkpoints/cartpole-swingup/vit/epoch_006.pt`.
 Presets: `vit` (LeWM, ViT-tiny from scratch + SIGReg), `dino` (frozen DINOv2
 patches, no SIGReg), `oracle` (MLP on the true state), `debug`.
+
+## Experiments
+
+Four DMControl tasks from MMBench2 (`nicklashansen/mmbench2`), each recorded by
+TD-MPC2 agents. Per task, the training table holds the `expert`, `mixed-small`,
+`mixed-large` and `zeros` splits: **260 episodes of 501 rows** (130,260 frames),
+26 of them held out by the world model; `val` + `test` (40 more episodes) are
+never trained on. One row is **2 simulator steps** (TD-MPC2's action repeat, so
+per-row reward reaches 2). Frames are 224x224 RGB.
+
+| task | observation (oracle state) | action | probe reports |
+|---|---|---|---|
+| acrobot-swingup | 6: cos upper, cos lower, sin upper, sin lower link; 2 joint velocities | 1: torque at the **elbow** (the shoulder has no motor) | shoulder, elbow angle (deg) |
+| cartpole-swingup | 5: cart x; cos, sin pole; cart velocity; pole angular velocity | 1: horizontal **force on the cart** | cart position (cm), pole angle (deg) |
+| pendulum-swingup | 3: cos, sin pole; angular velocity | 1: **torque at the pivot**, too weak to lift the pole directly (it has to swing) | pole angle (deg) |
+| reacher-easy | 6: shoulder angle, wrist angle (raw radians); finger-to-target x, y; 2 joint velocities | 2: torques at the **shoulder** and the **wrist** | shoulder, wrist (deg), to_target x, y (cm) |
+
+- Every action is normalised to [-1, 1]. MMBench pads actions to 16 columns
+  (noise in the `mixed`/`val`/`test` splits); only the real ones are kept.
+- The probe regresses angles as cos/sin (a raw angle jumps at +-180 degrees, and
+  reacher's shoulder winds past it), positions as is (src/tasks.py).
+- The world model never sees the oracle state with the `vit` preset; it is only
+  the probe's target.
+
+## Hyperparameters
+
+All in `config.py` (preset `vit`) and the scripts' defaults; `run.py` sets only
+`data.task` and `optim.stop_epoch`.
+
+**Data**
+
+| | |
+|---|---|
+| frameskip | 5 rows (10 sim steps) per latent step; the action of a latent step is its 5 raw actions, flattened (5 x action_dim) |
+| history | 3 latent frames fed to the predictor (also its context at inference) |
+| training window | history 3 + 1 predicted = 4 latent frames = 20 rows |
+| image size | 224, ImageNet normalisation |
+| window stride | train 2 rows, val 5 rows |
+| held-out | 26 of 260 episodes (seeded split, seed 3072) |
+| normalisation | z-score of actions (and state for the oracle), cached next to the h5 |
+
+**Model** (18.1M parameters, all trained jointly)
+
+| | |
+|---|---|
+| encoder | ViT-tiny/16 (`vit_tiny_patch16_224`) from scratch, class token, width 192 |
+| projector, pred_proj | MLP 192 -> 2048 -> 192 with BatchNorm |
+| action encoder | 1x1 conv to 64, then MLP 64 -> 768 -> 192 |
+| predictor | causal transformer, 6 layers, 16 heads x 64, MLP 2048, dropout 0.1, actions via AdaLN-zero |
+| loss | next-latent MSE (teacher-forced) + 0.09 x SIGReg (17 knots, 1024 projections) |
+
+**Optimisation**
+
+| | |
+|---|---|
+| optimiser | AdamW, lr 5e-5, weight decay 1e-3, betas (0.9, 0.999), grad clip 1.0, bf16 autocast |
+| batch | 128 windows |
+| epoch | 2000 steps (random windows with replacement), validation 100 steps |
+| LR schedule | 2 warmup epochs, then cosine to 0.01 x lr over `optim.epochs` = 100 epochs |
+| stopping | after epoch `optim.stop_epoch` = 6 (7 x 2000 steps); everything is analysed on `epoch_006.pt` |
+| time | ~14.5 min per epoch on one 24 GB GPU, ~1h45m per task |
+
+**Analyses**
+
+| | |
+|---|---|
+| probe | closed-form ridge (strength 1e-3 x N) on standardised features; every 2nd training row; patch latents pooled to 4x4 |
+| decoder | conv decoder to 112x112, 20k steps, batch 128, AdamW lr 1e-3 (one-cycle), 10x loss weight on pixels away from the mean frame; every 2nd training row |
+| rollout | horizon 50 latent steps (250 rows), a window at every latent step, held-out + val/test episodes (66), 4 videos |
 
 ## Notes
 
