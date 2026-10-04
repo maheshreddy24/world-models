@@ -1,0 +1,45 @@
+{
+  "os": "Linux-6.8.0-110-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.10.21",
+  "startedAt": "2026-09-29T11:24:29.429879Z",
+  "args": [
+    "--preset",
+    "ball_pixels",
+    "wandb.enabled=true"
+  ],
+  "program": "/home/world-models/lewm-cus/train.py",
+  "codePath": "lewm-cus/train.py",
+  "codePathLocal": "train.py",
+  "git": {
+    "remote": "https://github.com/maheshreddy24/world-models.git",
+    "commit": "7ef654ef935f53def5d46e30a9b914a0649e7926"
+  },
+  "email": "maheshr19e0@gmail.com",
+  "root": "/home/world-models/lewm-cus/checkpoints/exp_1790681067",
+  "host": "52af94af5921",
+  "executable": "/root/miniconda3/envs/lwm/bin/python",
+  "cpu_count": 128,
+  "cpu_count_logical": 256,
+  "gpu": "NVIDIA L4",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "53687091200",
+      "used": "17900371968"
+    }
+  },
+  "memory": {
+    "total": "1217089409024"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA L4",
+      "memoryTotal": "24152899584",
+      "cudaCores": 7424,
+      "architecture": "Ada",
+      "uuid": "GPU-deb2fa41-bd79-ac5f-57f7-8261d562cfe6"
+    }
+  ],
+  "cudaVersion": "13.2",
+  "writerId": "xo3tljznmg6br8rxu82yaae1k5uackr2"
+}

@@ -24,6 +24,15 @@ import torch
 from .solvers import Solver
 
 
+def to_model_input(obs, obs_key: str, image_transform, normalizer, device) -> torch.Tensor:
+    """Raw env observation -> the exact tensor the encoder saw in training."""
+    if obs_key == "pixels":
+        x = image_transform(np.asarray(obs))
+    else:
+        x = torch.as_tensor(normalizer.normalize(obs_key, np.asarray(obs, np.float32)))
+    return x.to(device, torch.float32)
+
+
 class MPCPlanner:
     """Args:
         model: a `LeWM` in eval mode.
@@ -54,8 +63,12 @@ class MPCPlanner:
         self.action_dim = normalizer.dim("action")
         self.bounds = action_space_bounds
 
+        # A model with `model.oracle_obs` also reads the state, frame by frame.
+        self.state_key = model.oracle_key if model.oracle_encoder is not None else None
+
         self.num_envs = 0
         self.history: list[deque] = []
+        self.state_history: list[deque] = []
         self.queue: list[deque] = []
         self.warm_start: torch.Tensor | None = None
         self.goal_emb: torch.Tensor | None = None
@@ -68,26 +81,36 @@ class MPCPlanner:
         """Clear all per-episode state for `num_envs` parallel environments."""
         self.num_envs = num_envs
         self.history = [deque(maxlen=self.plan.history_len) for _ in range(num_envs)]
+        self.state_history = [deque(maxlen=self.plan.history_len) for _ in range(num_envs)]
         self.queue = [deque() for _ in range(num_envs)]
         self.warm_start = None
         self.goal_emb = None
         self.last_cost = None
 
     @torch.no_grad()
-    def set_goal(self, goal_obs) -> None:
-        """Encode the goal once per episode — it never changes during a rollout."""
+    def set_goal(self, goal_obs, goal_state=None) -> None:
+        """Encode the goal once per episode — it never changes during a rollout.
+
+        `goal_state` is the oracle state at the goal, needed only by a model
+        that reads one next to the observation.
+        """
         obs = self._to_model_input(goal_obs)  # (N, ...)
-        self.goal_emb = self.model.encode(obs.unsqueeze(1))[:, 0]  # (N, D)
+        state = None
+        if self.state_key is not None:
+            if goal_state is None:
+                raise ValueError("this model reads the oracle state; pass set_goal(goal_obs, goal_state)")
+            state = self._to_model_input(goal_state, self.state_key).unsqueeze(1)  # (N, 1, S)
+        self.goal_emb = self.model.encode(obs.unsqueeze(1), state)[:, 0]  # (N, P, D)
 
     # ------------------------------------------------------------------ #
     #  Acting
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def act(self, obs, active: np.ndarray | None = None) -> np.ndarray:
+    def act(self, obs: dict, active: np.ndarray | None = None) -> np.ndarray:
         """Return one raw env action per environment.
 
         Args:
-            obs: current observation for every env, batched on axis 0.
+            obs: the env's observation dict; `obs[data.obs_key]` is batched on axis 0.
             active: bool mask of envs still running; inactive ones get zeros
                 and are never planned for.
 
@@ -98,9 +121,12 @@ class MPCPlanner:
             raise RuntimeError("call set_goal() before act()")
 
         active = np.ones(self.num_envs, dtype=bool) if active is None else np.asarray(active, bool)
-        processed = self._to_model_input(obs)  # (N, ...)
+        processed = self._to_model_input(obs[self.obs_key])  # (N, ...)
+        states = self._to_model_input(obs[self.state_key], self.state_key) if self.state_key else None
         for i in range(self.num_envs):
             self.history[i].append(processed[i])
+            if states is not None:
+                self.state_history[i].append(states[i])
 
         replan = [i for i in range(self.num_envs) if active[i] and not self.queue[i]]
         if replan:
@@ -114,8 +140,9 @@ class MPCPlanner:
 
     def _replan(self, envs: list[int]) -> None:
         idx = torch.as_tensor(envs, dtype=torch.long)
-        ctx = self._context(envs)  # (n, H0, ...)
-        ctx_emb = self.model.encode(ctx)  # (n, H0, D)
+        ctx = self._context(self.history, envs)  # (n, H0, ...)
+        state = self._context(self.state_history, envs) if self.state_key else None  # (n, H0, S)
+        ctx_emb = self.model.encode(ctx, state)  # (n, H0, P, D)
         goal_emb = self.goal_emb[idx.to(self.goal_emb.device)]
 
         def cost_fn(candidates: torch.Tensor) -> torch.Tensor:
@@ -157,23 +184,18 @@ class MPCPlanner:
     # ------------------------------------------------------------------ #
     #  Observation plumbing
     # ------------------------------------------------------------------ #
-    def _to_model_input(self, obs) -> torch.Tensor:
-        """Raw env observation -> the exact tensor the encoder saw in training."""
-        if self.obs_key == "pixels":
-            x = self.image_transform(np.asarray(obs))
-        else:
-            x = torch.as_tensor(self.normalizer.normalize(self.obs_key, np.asarray(obs, np.float32)))
-        return x.to(self.device, torch.float32)
+    def _to_model_input(self, obs, key: str | None = None) -> torch.Tensor:
+        return to_model_input(obs, key or self.obs_key, self.image_transform, self.normalizer, self.device)
 
-    def _context(self, envs: list[int]) -> torch.Tensor:
-        """Stack each env's observation history into (n, H0, ...).
+    def _context(self, history: list[deque], envs: list[int]) -> torch.Tensor:
+        """Stack each env's history (observations or states) into (n, H0, ...).
 
         Early in an episode there are fewer frames than `history_len`; the
         oldest available frame is repeated so the shape stays fixed.
         """
         rows = []
         for i in envs:
-            frames = list(self.history[i])
+            frames = list(history[i])
             pad = [frames[0]] * (self.plan.history_len - len(frames))
             rows.append(torch.stack(pad + frames))
         return torch.stack(rows)
@@ -192,9 +214,22 @@ class RandomPlanner:
     def reset(self, num_envs: int) -> None:
         self.num_envs = num_envs
 
-    def set_goal(self, goal_obs) -> None:  # noqa: D102 - nothing to do
+    def set_goal(self, goal_obs, goal_state=None) -> None:  # noqa: D102 - nothing to do
         pass
 
     def act(self, obs, active=None) -> np.ndarray:
         actions = self.rng.uniform(self.low, self.high, size=(self.num_envs, self.action_dim))
         return actions.astype(np.float32)
+
+
+class ZeroPlanner(RandomPlanner):
+    """Hold still: every action is zero — the "do nothing" floor.
+
+    OGBench actions are relative (effector displacement, gripper change), so zero
+    means "stay where you are". A task this solves was already in motion at its
+    start frame — the recorded arm velocity carried it through — and says nothing
+    about the planner. Compare every per-task number against this and random.
+    """
+
+    def act(self, obs, active=None) -> np.ndarray:
+        return np.zeros((self.num_envs, self.action_dim), dtype=np.float32)

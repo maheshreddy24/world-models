@@ -4,7 +4,11 @@
 /le-wm
 /temporal-straightening
 *.pth
-/checkpoints
+# /checkpoints
+
+/videos
+*.mp4
+/checkpoints/exp_*
 *.h5
 *.pt
 *.csv

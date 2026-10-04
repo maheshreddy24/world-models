@@ -2,15 +2,16 @@
 
     python train.py                              # pixels, default settings
     python train.py --preset cube_oracle         # oracle-state ablation
+    python train.py --preset cube_dino           # frozen DINOv2 patches, no SIGReg (DINO-WM)
     python train.py --preset debug               # 20-second smoke test
     python train.py optim.lr=1e-4 model.depth=8  # override anything from config.py
     python train.py --resume                     # continue the last checkpoint
 
-The objective is two terms and one hyperparameter: predict the next embedding,
-and keep the embedding distribution Gaussian so it cannot collapse.  Watch
-`emb_std` — if it heads for zero the representation is collapsing and
-`loss.sigreg_weight` is too low; `pred_vs_static` below 1 means the predictor
-beats assuming nothing moves.
+The objective is to predict the next embedding and, when the encoder is
+trainable, keep the embedding distribution Gaussian so it cannot collapse
+(`loss.use_sigreg`).  Watch `emb_std` — if it heads for zero the representation
+is collapsing and `loss.sigreg_weight` is too low; `pred_vs_static` below 1
+means the predictor beats assuming nothing moves.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from src.utils import (
     build_optimizer,
     count_params,
     load_checkpoint,
+    recalibrate_bn,
     save_checkpoint,
     set_seed,
 )
@@ -166,10 +168,15 @@ def main(argv=None) -> None:
 
     # -- model ------------------------------------------------------------ #
     model = build_model(cfg, action_dim=action_dim, state_dim=state_dim).to(device)
-    sigreg = SIGReg(cfg.loss.sigreg_knots, cfg.loss.sigreg_proj).to(device)
+    sigreg = SIGReg(cfg.loss.sigreg_knots, cfg.loss.sigreg_proj).to(device) if cfg.loss.use_sigreg else None
     if cfg.compile:
         model = torch.compile(model)
-    print(f"model | {cfg.model.encoder} encoder, {count_params(model)['total_M']:.1f}M params -> {run_dir}")
+    params = count_params(model)
+    print(
+        f"model | {cfg.model.encoder} encoder{' (frozen)' if cfg.model.freeze_encoder else ''}"
+        f", sigreg {'on' if sigreg is not None else 'off'}"
+        f", {params['total_M']:.1f}M params ({params['trainable_M']:.1f}M trainable) -> {run_dir}"
+    )
 
     optimizer = build_optimizer(model, cfg)
     steps_per_epoch = cfg.optim.steps_per_epoch or len(train_loader)
@@ -230,6 +237,9 @@ def main(argv=None) -> None:
             )
             logger.log({**train_stats, "epoch": epoch}, step=global_step, prefix="train_epoch/")
 
+            # BatchNorm running stats collected with dropout on do not fit eval mode;
+            # recompute them so val/* and the saved checkpoint reflect the model.
+            recalibrate_bn(model, train_set, device, num_workers=min(4, cfg.optim.num_workers))
             with torch.no_grad():
                 val_stats, _ = run_epoch(
                     model, sigreg, val_loader, cfg, device, autocast,

@@ -66,7 +66,7 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    """Multi-head self-attention. Causal by default — the predictor is autoregressive."""
+    """Multi-head self-attention. Causal unless given a mask — the predictor is autoregressive."""
 
     def __init__(self, dim: int, heads: int = 8, dim_head: int = 64, dropout: float = 0.0):
         super().__init__()
@@ -77,8 +77,11 @@ class Attention(nn.Module):
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
 
-    def forward(self, x: torch.Tensor, causal: bool = True) -> torch.Tensor:
-        """x: (B, T, D)"""
+    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        """x: (B, N, D). attn_mask: (N, N) bool, True where a query may attend a key.
+
+        Without a mask, attention is plain causal over the N tokens.
+        """
         x = self.norm(x)
         q, k, v = (
             rearrange(t, "b t (h d) -> b h t d", h=self.heads)
@@ -88,8 +91,9 @@ class Attention(nn.Module):
         # is fine with it, but skip the flag to keep the fast path predictable.
         out = F.scaled_dot_product_attention(
             q, k, v,
+            attn_mask=attn_mask,
             dropout_p=self.dropout if self.training else 0.0,
-            is_causal=causal and x.size(1) > 1,
+            is_causal=attn_mask is None and x.size(1) > 1,
         )
         return self.to_out(rearrange(out, "b h t d -> b t (h d)"))
 
@@ -104,8 +108,8 @@ class Block(nn.Module):
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor | None = None) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x))
+    def forward(self, x: torch.Tensor, c: torch.Tensor | None = None, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x), attn_mask)
         return x + self.mlp(self.norm2(x))
 
 
@@ -126,10 +130,10 @@ class ConditionalBlock(nn.Module):
         nn.init.zeros_(self.modulation[-1].weight)
         nn.init.zeros_(self.modulation[-1].bias)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
-        """x: (B, T, D) tokens, c: (B, T, D) conditions."""
+    def forward(self, x: torch.Tensor, c: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        """x: (B, N, D) tokens, c: (B, N, D) conditions."""
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = self.modulation(c).chunk(6, dim=-1)
-        x = x + gate_a * self.attn(modulate(self.norm1(x), shift_a, scale_a))
+        x = x + gate_a * self.attn(modulate(self.norm1(x), shift_a, scale_a), attn_mask)
         return x + gate_m * self.mlp(modulate(self.norm2(x), shift_m, scale_m))
 
 
@@ -158,10 +162,10 @@ class Transformer(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
         self.output_proj = nn.Linear(hidden_dim, output_dim) if hidden_dim != output_dim else nn.Identity()
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, c: torch.Tensor | None = None, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = self.input_proj(x)
         if c is not None:
             c = self.cond_proj(c)
         for block in self.layers:
-            x = block(x, c)
+            x = block(x, c, attn_mask)
         return self.output_proj(self.norm(x))

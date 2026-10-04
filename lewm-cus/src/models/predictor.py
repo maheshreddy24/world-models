@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+from einops import rearrange
 from torch import nn
 
 from .blocks import Transformer
@@ -33,18 +34,33 @@ class ActionEncoder(nn.Module):
         return self.embed(x)
 
 
+def frame_causal_mask(frames: int, patches: int, device=None) -> torch.Tensor | None:
+    """(T*P, T*P) bool mask: a token attends to every token of its own and earlier frames.
+
+    This is the DINO-WM mask. With one token per frame it is plain causal
+    attention, so None is returned and SDPA's faster built-in causal path is used.
+    """
+    if patches == 1:
+        return None
+    frame = torch.arange(frames, device=device).repeat_interleave(patches)
+    return frame[:, None] >= frame[None, :]
+
+
 class ARPredictor(nn.Module):
     """Predict the next latent from the latent history and the actions taken.
 
-    Causal transformer over `(B, T, D)` embeddings, with the action embedding of
-    each step injected into that step's block through AdaLN-zero.  Output slot
-    `t` is the prediction of embedding `t+1`.
+    Transformer over `(B, T, P, D)` latents (T frames of P tokens each), flattened
+    to T*P tokens with attention causal between frames, so one pass trains all
+    T next-frame predictions.  The action embedding of each frame reaches every
+    token of that frame through AdaLN-zero.  Output frame `t` is the prediction
+    of frame `t+1`.
     """
 
     def __init__(
         self,
         *,
         num_frames: int,
+        num_patches: int = 1,
         input_dim: int,
         hidden_dim: int,
         output_dim: int | None = None,
@@ -56,7 +72,13 @@ class ARPredictor(nn.Module):
     ):
         super().__init__()
         self.num_frames = num_frames
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, input_dim) * 0.02)
+        self.num_patches = num_patches
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, input_dim) * 0.02)  # which frame
+        # Which token within a frame. Only created for P > 1, so checkpoints of
+        # pooled encoders keep exactly the parameters they were saved with.
+        self.patch_pos_embedding = (
+            nn.Parameter(torch.randn(1, 1, num_patches, input_dim) * 0.02) if num_patches > 1 else None
+        )
         self.transformer = Transformer(
             input_dim,
             hidden_dim,
@@ -70,13 +92,24 @@ class ARPredictor(nn.Module):
         )
 
     def forward(self, emb: torch.Tensor, act_emb: torch.Tensor) -> torch.Tensor:
-        """emb: (B, T, D), act_emb: (B, T, D) -> (B, T, D) next-step predictions."""
-        t = emb.size(1)
+        """emb: (B, T, P, D), act_emb: (B, T, D) -> (B, T, P, D) next-frame predictions."""
+        _, t, p, _ = emb.shape
         if t > self.num_frames:
             raise ValueError(
                 f"context of {t} steps exceeds the {self.num_frames} position "
                 "embeddings; raise data.history or shorten the window"
             )
+        if p != self.num_patches:
+            raise ValueError(f"expected {self.num_patches} tokens per frame, got {p}")
         if act_emb.size(1) != t:
             raise ValueError(f"got {t} embeddings but {act_emb.size(1)} actions")
-        return self.transformer(emb + self.pos_embedding[:, :t], act_emb)
+
+        x = emb + self.pos_embedding[:, :t, None]
+        if self.patch_pos_embedding is not None:
+            x = x + self.patch_pos_embedding
+        cond = act_emb[:, :, None].expand(-1, -1, p, -1)  # a frame's action conditions all its tokens
+
+        x = rearrange(x, "b t p d -> b (t p) d")
+        cond = rearrange(cond, "b t p d -> b (t p) d")
+        out = self.transformer(x, cond, attn_mask=frame_causal_mask(t, p, x.device))
+        return rearrange(out, "b (t p) d -> b t p d", t=t)

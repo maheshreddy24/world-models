@@ -23,6 +23,9 @@ import gymnasium as gym
 import numpy as np
 import stable_worldmodel  # noqa: F401  — registers the `swm/...` env ids
 
+from ..data.ogbench import CONTACT, cube_proprio
+from ._render import close_env
+
 
 class CubeVecEnv:
     """Args:
@@ -33,6 +36,7 @@ class CubeVecEnv:
         max_episode_steps: truncation cap per env.
         terminate_at_goal: stop an env the moment the simulator calls it solved.
         seed: base seed; env `i` gets `seed + i`.
+        proprio: which `cube_proprio` the observation dict carries (`policy.proprio`).
     """
 
     def __init__(
@@ -44,10 +48,12 @@ class CubeVecEnv:
         max_episode_steps: int = 200,
         terminate_at_goal: bool = True,
         seed: int = 0,
+        proprio: str = "arm",
     ):
         self.num_envs = num_envs
         self.img_size = img_size
         self.seed = seed
+        self.proprio = proprio
         self.envs = [
             gym.make(
                 env_id,
@@ -71,15 +77,19 @@ class CubeVecEnv:
     # ------------------------------------------------------------------ #
     #  Episode setup
     # ------------------------------------------------------------------ #
-    def reset_to(self, qpos: np.ndarray, qvel: np.ndarray) -> dict:
+    def reset_to(self, qpos: np.ndarray, qvel: np.ndarray, prev_observation: np.ndarray | None = None) -> dict:
         """Reset every env to a recorded simulator state.
 
         Args:
             qpos: (num_envs, nq) recorded positions.
             qvel: (num_envs, nv) recorded velocities.
+            prev_observation: (num_envs, 28) recorded state one step earlier,
+                so a first "ee" `proprio` carries the true end-effector velocity.
+                Without it that velocity starts at zero. "arm" ignores it.
 
         Returns:
-            dict with `pixels` (N, H, W, 3) uint8 and `observation` (N, 28).
+            dict with `pixels` (N, H, W, 3) uint8, `observation` (N, 28),
+            `proprio` (N, 13 | 6) of kind `self.proprio` and `contact` (N, 1).
         """
         observations = []
         for i, env in enumerate(self.envs):
@@ -90,7 +100,14 @@ class CubeVecEnv:
         self.terminated[:] = False
         self.truncated[:] = False
         self.success[:] = False
-        return {"pixels": self.render(), "observation": np.stack(observations)}
+        self._last_obs = np.stack(observations)
+        prev = self._last_obs if prev_observation is None else np.asarray(prev_observation, np.float32)
+        return {
+            "pixels": self.render(),
+            "observation": self._last_obs,
+            **self._policy_inputs(prev),
+            **self._bodies(),
+        }
 
     def set_targets(self, target_pos: np.ndarray, target_quat: np.ndarray | None = None, cube_id: int = 0) -> None:
         """Move each env's goal marker, which is also what success is measured against."""
@@ -108,6 +125,7 @@ class CubeVecEnv:
         arrays stay rectangular and videos stay in sync.
         """
         actions = np.asarray(actions, np.float32).reshape(self.num_envs, self.action_dim)
+        prev = self._last_obs
         observations = []
         for i, env in enumerate(self.envs):
             if self.done[i]:
@@ -125,9 +143,32 @@ class CubeVecEnv:
         return {
             "pixels": self.render(),
             "observation": self._last_obs,
+            **self._policy_inputs(prev),
+            **self._bodies(),
             "success": self.success.copy(),
             "terminated": self.terminated.copy(),
             "truncated": self.truncated.copy(),
+        }
+
+    def _bodies(self) -> dict:
+        """True cube and end-effector positions, metres — for grasp diagnostics.
+
+        Read straight off the simulator rather than the 28-d observation, whose
+        copies are centred and scaled.  A frozen env keeps reporting its last
+        pose, like every other field here.
+        """
+        cube, effector = [], []
+        for env in self.envs:
+            base = env.unwrapped
+            cube.append(base._data.joint("object_joint_0").qpos[:3].copy())
+            effector.append(base._data.site_xpos[base._pinch_site_id].copy())
+        return {"cube_pos": np.stack(cube).astype(np.float32), "effector_pos": np.stack(effector).astype(np.float32)}
+
+    def _policy_inputs(self, prev: np.ndarray) -> dict:
+        """The diffusion policy's side inputs, defined exactly as in its training data."""
+        return {
+            "proprio": cube_proprio(self._last_obs, prev, self.proprio),
+            "contact": self._last_obs[:, CONTACT].copy(),
         }
 
     @property
@@ -142,7 +183,7 @@ class CubeVecEnv:
 
     def close(self) -> None:
         for env in self.envs:
-            env.close()
+            close_env(env)
 
     def __enter__(self) -> "CubeVecEnv":
         return self

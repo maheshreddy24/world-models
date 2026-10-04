@@ -1,0 +1,236 @@
+_wandb:
+    value:
+        cli_version: 0.30.0
+        e:
+            xo3tljznmg6br8rxu82yaae1k5uackr2:
+                args:
+                    - --preset
+                    - ball_pixels
+                    - wandb.enabled=true
+                codePath: lewm-cus/train.py
+                codePathLocal: train.py
+                cpu_count: 128
+                cpu_count_logical: 256
+                cudaVersion: "13.2"
+                disk:
+                    /:
+                        total: "53687091200"
+                        used: "17900371968"
+                email: maheshr19e0@gmail.com
+                executable: /root/miniconda3/envs/lwm/bin/python
+                git:
+                    commit: 7ef654ef935f53def5d46e30a9b914a0649e7926
+                    remote: https://github.com/maheshreddy24/world-models.git
+                gpu: NVIDIA L4
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 7424
+                      memoryTotal: "24152899584"
+                      name: NVIDIA L4
+                      uuid: GPU-deb2fa41-bd79-ac5f-57f7-8261d562cfe6
+                host: 52af94af5921
+                memory:
+                    total: "1217089409024"
+                os: Linux-6.8.0-110-generic-x86_64-with-glibc2.35
+                program: /home/world-models/lewm-cus/train.py
+                python: CPython 3.10.21
+                root: /home/world-models/lewm-cus/checkpoints/exp_1790681067
+                startedAt: "2026-09-29T11:24:29.429879Z"
+                writerId: xo3tljznmg6br8rxu82yaae1k5uackr2
+        m: []
+        python_version: 3.10.21
+        t:
+            "1":
+                - 1
+                - 41
+                - 49
+                - 63
+            "2":
+                - 1
+                - 41
+                - 49
+                - 63
+            "3":
+                - 2
+                - 13
+                - 16
+                - 61
+            "4": 3.10.21
+            "5": 0.30.0
+            "12": 0.30.0
+            "13": linux-x86_64
+compile:
+    value: false
+data:
+    value:
+        backend: h5
+        frameskip: 5
+        h5_path: /home/world-models/.stable_worldmodel/datasets/ballcatch/ballcatch_20k.h5
+        history: 3
+        img_size: 128
+        max_episodes: null
+        num_preds: 1
+        obs_key: pixels
+        rdcc_mb: 256
+        stats_max_rows: 200000
+        stats_path: null
+        train_stride: 1
+        val_episodes: 2000
+        val_stride: 3
+device:
+    value: cuda
+eval:
+    value:
+        cube_tol: 0.04
+        env_id: swm/OGBCube-v0
+        env_type: single
+        eval_budget: 50
+        goal_offset: 3
+        grasp_contact: 0.5
+        grasp_dist_cm: 3
+        lift_cm: 2
+        min_goal_distance: 0.5
+        num_envs: 100
+        num_eval: 200
+        num_videos: 8
+        save_video: true
+        terminate_at_goal: true
+        video_fps: 20
+exp_id:
+    value: exp_1790681067
+loss:
+    value:
+        sigreg_knots: 17
+        sigreg_proj: 1024
+        sigreg_weight: 0.09
+        use_sigreg: true
+model:
+    value:
+        act_mlp_scale: 4
+        act_smooth_dim: 64
+        cost: final_mse
+        depth: 6
+        dim_head: 64
+        dino_img_size: 196
+        dino_name: dinov2_vits14
+        dino_tokens: patch
+        drop_obs: ""
+        dropout: 0.1
+        embed_dim: 192
+        encoder: vit
+        freeze_encoder: false
+        heads: 16
+        mlp_dim: 2048
+        mlp_hidden: 512
+        oracle_hidden: 512
+        oracle_obs: ""
+        proj_hidden: 2048
+        proj_norm: batch
+        use_projector: true
+        vit_name: vit_tiny_patch16_224
+        vit_pool: cls
+        vit_pretrained: false
+optim:
+    value:
+        amp_dtype: bf16
+        batch_size: 128
+        betas:
+            - 0.9
+            - 0.999
+        ckpt_every: 1
+        epochs: 100
+        grad_clip: 1
+        log_every: 20
+        lr: 5e-05
+        min_lr_scale: 0.01
+        num_workers: 12
+        persistent_workers: true
+        pin_memory: true
+        prefetch_factor: 4
+        select_metric: pred_vs_static
+        steps_per_epoch: 2000
+        val_steps: 100
+        warmup_epochs: 2
+        weight_decay: 0.001
+out_dir:
+    value: /home/world-models/lewm-cus/checkpoints
+plan:
+    value:
+        action_block: 5
+        chunk_size: 0
+        ddim_steps: 10
+        diffusion_samples: 1
+        history_len: 1
+        horizon: 5
+        min_std: 0.01
+        momentum: 0.1
+        n_iters: 30
+        num_samples: 300
+        planner: mpc
+        receding_horizon: 5
+        solver: cem
+        temperature: 1
+        topk: 30
+        var_scale: 1
+        warm_start: true
+policy:
+    value:
+        chunk: 5
+        cond_layers: 2
+        depth: 8
+        dropout: 0.1
+        ema_decay: 0.999
+        goal: cube_xyz
+        goal_noise: 0
+        goal_offset_max: 50
+        goal_offset_min: 5
+        heads: 4
+        proprio: arm
+        random_backbone: false
+        train_timesteps: 100
+        use_contact: false
+        use_proprio: true
+        width: 256
+rollout:
+    value:
+        batch_size: 32
+        horizon: 10
+        num_sequences: 256
+        num_videos: 4
+        retrieval_bank: 2048
+        retrieval_video: true
+run_name:
+    value: lewm_ball
+scene:
+    value:
+        balance_tasks: true
+        budget: 250
+        cube_tol: 0.04
+        data_dir: /home/world-models/lewm-cus/ogbench_scene_single
+        env_id: visual-scene-v0
+        eval_batch: 50
+        hindsight_max_gap: 160
+        hindsight_min_gap: 30
+        num_eval: null
+        p_task: 0.5
+        render_size: 64
+        resample_start: true
+        samples_per_epoch: 200000
+        slide_tol: 0.03
+        store_dir: null
+        train_npz: visual-scene-play-v0.npz
+        train_pairs: train_pairs.npz
+        v1_pairs: v1_pairs.npz
+        val_npz: visual-scene-play-v0-val.npz
+        val_pairs: null
+        val_samples: 20000
+seed:
+    value: 3072
+wandb:
+    value:
+        enabled: true
+        entity: null
+        mode: online
+        name: null
+        project: lewm-cus

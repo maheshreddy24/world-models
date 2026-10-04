@@ -1,0 +1,11 @@
+{
+  "ckpt": "checkpoints/exp_1791093146/epoch_006.pt",
+  "res": 112,
+  "steps": 20000,
+  "train_frames": 58734,
+  "heldout_frames": 2626,
+  "latent_noise": 0.0,
+  "fg_weight": 10.0,
+  "heldout_psnr": 46.95426559448242,
+  "mean_frame_psnr": 29.993471145629883
+}

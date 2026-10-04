@@ -33,8 +33,9 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import get_config
-from src.data import H5Reader, ImageTransform, SequenceDataset, get_normalizer, split_episodes
-from src.utils import load_model, make_panel, save_json, save_video, set_seed
+from src.data import ImageTransform, build_datasets
+from src.models import latent_sq_dist
+from src.utils import load_model, make_panel, recalibrate_bn, save_json, save_video, set_seed
 
 
 @torch.no_grad()
@@ -46,16 +47,17 @@ def latent_error_curves(model, loader, cfg, device, horizon: int, history: int) 
     for batch in tqdm(loader, desc="rollout", dynamic_ncols=True, disable=not sys.stderr.isatty()):
         obs = batch[cfg.data.obs_key].to(device)
         actions = batch["action"].to(device)
+        state = batch.get(model.oracle_key)  # read only by a model with model.oracle_obs
 
-        emb = model.encode(obs)  # (B, T, D) ground-truth latents
+        emb = model.encode(obs, None if state is None else state.to(device))  # (B, T, P, D) ground-truth latents
         # Actions 0..T-2 carry steps 0..T-1, so every prediction has a target.
-        preds = model.rollout(emb[:, :history], actions[:, :-1])  # (B, horizon, D)
+        preds = model.rollout(emb[:, :history], actions[:, :-1])  # (B, horizon, P, D)
         target = emb[:, history:]
         static = emb[:, history - 1 : history].expand_as(target)  # "nothing moves"
 
-        sums["mse"] += (preds - target).pow(2).sum(-1).sum(0)
-        sums["static_mse"] += (static - target).pow(2).sum(-1).sum(0)
-        sums["cosine"] += torch.cosine_similarity(preds, target, dim=-1).sum(0)
+        sums["mse"] += latent_sq_dist(preds, target).sum(0)
+        sums["static_mse"] += latent_sq_dist(static, target).sum(0)
+        sums["cosine"] += torch.cosine_similarity(preds, target, dim=-1).mean(-1).sum(0)
         count += obs.size(0)
 
     mse = (sums["mse"] / count).cpu().numpy()
@@ -85,13 +87,18 @@ def imagination_video(model, reader, cfg, device, episode: int, horizon: int, hi
     actions = torch.from_numpy(raw_actions.astype(np.float32).reshape(1, n_steps, -1)).to(device)
 
     pixels = transform(frames).unsqueeze(0).to(device)  # (1, n, 3, H, W)
-    emb = model.encode(pixels)  # (1, n, D)
+    state = None
+    if model.oracle_encoder is not None:
+        raw_state = reader.span(model.oracle_key, start, start + n_steps * fs)[::fs]
+        state = normalizer.normalize(model.oracle_key, raw_state).astype(np.float32)
+        state = torch.from_numpy(state).unsqueeze(0).to(device)  # (1, n, S)
+    emb = model.encode(pixels, state)  # (1, n, P, D)
 
-    preds = model.rollout(emb[:, :history], actions[:, :-1])[0]  # (n - history, D)
+    preds = model.rollout(emb[:, :history], actions[:, :-1])[0]  # (n - history, P, D)
     bank = emb[0]  # every real frame of the episode is a retrieval candidate
 
     # Nearest neighbour in latent space = the frame the model thinks it is at.
-    distances = torch.cdist(preds, bank)  # (n - history, n)
+    distances = torch.cdist(preds.flatten(1), bank.flatten(1))  # (n - history, n)
     retrieved = distances.argmin(dim=1).cpu().numpy()
 
     truth = frames[history:]
@@ -137,22 +144,16 @@ def main(argv=None) -> None:
     cfg.data, cfg.model = train_cfg.data, train_cfg.model
 
     history, horizon = cfg.data.history, cfg.rollout.horizon
-    reader = H5Reader(cfg.data.h5_path, rdcc_mb=cfg.data.rdcc_mb)
-    normalizer = get_normalizer(cfg, reader, ("action", "observation"))
     transform = ImageTransform(cfg.data.img_size)
 
-    _, val_eps = split_episodes(reader.num_episodes, cfg.data.val_episodes, cfg.seed, cfg.data.max_episodes)
-
-    dataset = SequenceDataset(
-        reader=reader,
-        episodes=val_eps,
-        seq_len=history + horizon,
-        frameskip=cfg.data.frameskip,
-        keys=(cfg.data.obs_key,),
-        normalizer=normalizer,
-        image_transform=transform,
-        stride=cfg.data.frameskip,
-    )
+    # A rollout sequence is longer than a training one: `history` observed steps
+    # plus `horizon` predicted ones. Widening `num_preds` is how that is asked
+    # for, and keeps the dataset construction identical on either backend.
+    cfg.data.num_preds = horizon
+    train_set, dataset, store, normalizer = build_datasets(cfg, val_stride=cfg.data.frameskip)
+    recalibrate_bn(model, train_set, device)  # eval-mode BatchNorm stats, see src/utils.py
+    reader = dataset.reader  # the validation split's own store
+    val_eps = np.unique(np.searchsorted(reader.ep_offset, dataset.starts, side="right") - 1)
     picks = np.random.default_rng(cfg.seed).choice(
         len(dataset), size=min(cfg.rollout.num_sequences, len(dataset)), replace=False
     )
@@ -182,6 +183,7 @@ def main(argv=None) -> None:
 
     print(f"curves       {out_dir / 'latent_rollout.png'}")
     reader.close()
+    store.close()
 
 
 if __name__ == "__main__":

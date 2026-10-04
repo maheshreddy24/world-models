@@ -1,0 +1,17 @@
+                                                                                                                                                                           
+[   2000] train_epoch/loss=0.9001  train_epoch/pred_loss=0.1697  train_epoch/sigreg_loss=8.115  train_epoch/emb_std=0.8566  train_epoch/emb_norm=11.79  train_epoch/pred_vs_static=1.795  train_epoch/grad_norm=5.402  train_epoch/lr=1.251e-05  train_epoch/epoch=0
+[   2000] val/loss=2.472  val/pred_loss=0.04474  val/sigreg_loss=26.97  val/emb_std=0.9321  val/emb_norm=15.03  val/pred_vs_static=5.633  val/epoch=0
+[   4000] train_epoch/loss=0.2065  train_epoch/pred_loss=0.01417  train_epoch/sigreg_loss=2.138  train_epoch/emb_std=0.9919  train_epoch/emb_norm=13.56  train_epoch/pred_vs_static=4.484  train_epoch/grad_norm=1.575  train_epoch/lr=3.751e-05  train_epoch/epoch=1
+[   4000] val/loss=1.704  val/pred_loss=0.01847  val/sigreg_loss=18.73  val/emb_std=0.9323  val/emb_norm=14.38  val/pred_vs_static=4.786  val/epoch=1
+[   6000] train_epoch/loss=0.1336  train_epoch/pred_loss=0.009249  train_epoch/sigreg_loss=1.382  train_epoch/emb_std=0.9859  train_epoch/emb_norm=13.62  train_epoch/pred_vs_static=5.238  train_epoch/grad_norm=0.8189  train_epoch/lr=5e-05  train_epoch/epoch=2
+[   6000] val/loss=1.443  val/pred_loss=0.008168  val/sigreg_loss=15.94  val/emb_std=0.903  val/emb_norm=13.73  val/pred_vs_static=3.738  val/epoch=2
+[   8000] train_epoch/loss=0.1112  train_epoch/pred_loss=0.007183  train_epoch/sigreg_loss=1.156  train_epoch/emb_std=0.9849  train_epoch/emb_norm=13.64  train_epoch/pred_vs_static=5.763  train_epoch/grad_norm=0.64  train_epoch/lr=4.997e-05  train_epoch/epoch=3
+[   8000] val/loss=1.475  val/pred_loss=0.008052  val/sigreg_loss=16.29  val/emb_std=0.9475  val/emb_norm=14.39  val/pred_vs_static=4.571  val/epoch=3
+[  10000] train_epoch/loss=0.1002  train_epoch/pred_loss=0.006187  train_epoch/sigreg_loss=1.044  train_epoch/emb_std=0.9851  train_epoch/emb_norm=13.66  train_epoch/pred_vs_static=6.006  train_epoch/grad_norm=0.5585  train_epoch/lr=4.992e-05  train_epoch/epoch=4
+[  10000] val/loss=1.428  val/pred_loss=0.007178  val/sigreg_loss=15.79  val/emb_std=0.9123  val/emb_norm=13.88  val/pred_vs_static=5.1  val/epoch=4
+[  12000] train_epoch/loss=0.09305  train_epoch/pred_loss=0.005438  train_epoch/sigreg_loss=0.9734  train_epoch/emb_std=0.9856  train_epoch/emb_norm=13.67  train_epoch/pred_vs_static=6.222  train_epoch/grad_norm=0.5062  train_epoch/lr=4.984e-05  train_epoch/epoch=5
+[  12000] val/loss=1.382  val/pred_loss=0.005492  val/sigreg_loss=15.29  val/emb_std=0.9129  val/emb_norm=13.85  val/pred_vs_static=4.611  val/epoch=5
+[  14000] train_epoch/loss=0.08852  train_epoch/pred_loss=0.00492  train_epoch/sigreg_loss=0.9289  train_epoch/emb_std=0.9861  train_epoch/emb_norm=13.67  train_epoch/pred_vs_static=6.261  train_epoch/grad_norm=0.4751  train_epoch/lr=4.974e-05  train_epoch/epoch=6
+[  14000] val/loss=1.411  val/pred_loss=0.005704  val/sigreg_loss=15.62  val/emb_std=0.9159  val/emb_norm=13.93  val/pred_vs_static=5.293  val/epoch=6
+
+interrupted — saving before exit

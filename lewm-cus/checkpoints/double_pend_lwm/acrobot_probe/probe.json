@@ -1,0 +1,44 @@
+{
+  "ckpt": "checkpoints/exp_1791093146/epoch_006.pt",
+  "random_init": false,
+  "train_rows": 58734,
+  "heldout_rows": 13026,
+  "train_episodes": 234,
+  "heldout_episodes": 26,
+  "train": {
+    "shoulder_mae_deg": 1.0758014917373657,
+    "elbow_mae_deg": 2.2559947967529297,
+    "shoulder_median_deg": 0.7840545177459717,
+    "elbow_median_deg": 1.7136261463165283,
+    "r2_cos_sin": [
+      0.997529923915863,
+      0.9977766275405884,
+      0.9916279911994934,
+      0.9951740503311157
+    ]
+  },
+  "heldout": {
+    "shoulder_mae_deg": 1.0881036520004272,
+    "elbow_mae_deg": 2.2630550861358643,
+    "shoulder_median_deg": 0.8188850283622742,
+    "elbow_median_deg": 1.7475448846817017,
+    "r2_cos_sin": [
+      0.9977969527244568,
+      0.9978212118148804,
+      0.9911121726036072,
+      0.9950425624847412
+    ]
+  },
+  "heldout_mean_guess": {
+    "shoulder_mae_deg": 50.07270431518555,
+    "elbow_mae_deg": 74.52987670898438,
+    "shoulder_median_deg": 35.46189880371094,
+    "elbow_median_deg": 68.77815246582031,
+    "r2_cos_sin": [
+      -8.809566497802734e-05,
+      -0.007657051086425781,
+      -0.00029599666595458984,
+      -0.023053765296936035
+    ]
+  }
+}
