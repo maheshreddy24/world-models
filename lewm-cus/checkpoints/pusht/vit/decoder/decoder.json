@@ -1,0 +1,11 @@
+{
+  "ckpt": "checkpoints/pusht/vit/epoch_006.pt",
+  "res": 112,
+  "steps": 20000,
+  "latent_noise": 0.0,
+  "fg_weight": 10.0,
+  "train_frames": 228769,
+  "heldout_frames": 25375,
+  "heldout_psnr": 34.427616119384766,
+  "mean_frame_psnr": 24.410930633544922
+}

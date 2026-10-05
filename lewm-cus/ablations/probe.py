@@ -46,7 +46,7 @@ class EpisodeRows(Dataset):
         start = int(self.reader.ep_offset[ep])
         stop = start + int(self.reader.ep_len[ep])
         frames = self.reader.span("pixels", start, stop)[:: self.stride]
-        obs = torch.from_numpy(self.reader.span("observation", start, stop)[:: self.stride].astype(np.float32))
+        obs = torch.from_numpy(self.reader.span(self.task.state_key, start, stop)[:: self.stride].astype(np.float32))
         return frames, self.task.targets(obs)
 
 

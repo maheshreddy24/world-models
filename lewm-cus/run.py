@@ -43,6 +43,12 @@ TASK_ARGS = {
         "decoder": ["--row-stride", "10"],
         "rollout": ["--horizon", "30"],
     },
+    # pusht: 18.7k episodes of 49-246 rows (median 123); a 15-step horizon fits 82% of them.
+    "pusht": {
+        "probe": ["--row-stride", "10"],
+        "decoder": ["--row-stride", "10"],
+        "rollout": ["--horizon", "15"],
+    },
 }
 
 # --smoke: a few steps of everything, written to checkpoints/_smoke/

@@ -1,0 +1,58 @@
+{
+  "ckpt": "/home/world-models/lewm-cus/checkpoints/pusht/vit/epoch_006.pt",
+  "task": "pusht",
+  "random_init": true,
+  "features": 192,
+  "train_frames": 228769,
+  "heldout_frames": 124970,
+  "train_episodes": 17685,
+  "heldout_episodes": 1000,
+  "train": {
+    "agent_mae_px": 120.0011215209961,
+    "agent_median_px": 115.2434310913086,
+    "block_mae_px": 79.55381774902344,
+    "block_median_px": 68.95777893066406,
+    "block_angle_mae_deg": 45.774417877197266,
+    "block_angle_median_deg": 27.467742919921875,
+    "r2_targets": [
+      0.1540975570678711,
+      0.1158062219619751,
+      0.13972997665405273,
+      0.14879053831100464,
+      0.15605515241622925,
+      0.20799797773361206
+    ]
+  },
+  "heldout": {
+    "agent_mae_px": 120.80802154541016,
+    "agent_median_px": 116.01068878173828,
+    "block_mae_px": 79.96701049804688,
+    "block_median_px": 68.98771667480469,
+    "block_angle_mae_deg": 48.081581115722656,
+    "block_angle_median_deg": 29.03623390197754,
+    "r2_targets": [
+      0.12205034494400024,
+      0.09307074546813965,
+      0.11259967088699341,
+      0.13530778884887695,
+      0.14557808637619019,
+      0.20923477411270142
+    ]
+  },
+  "heldout_mean_guess": {
+    "agent_mae_px": 131.83041381835938,
+    "agent_median_px": 127.5749282836914,
+    "block_mae_px": 88.20330810546875,
+    "block_median_px": 80.26235961914062,
+    "block_angle_mae_deg": 52.53921127319336,
+    "block_angle_median_deg": 31.543989181518555,
+    "r2_targets": [
+      -0.00010561943054199219,
+      -0.0011082887649536133,
+      -0.0003616809844970703,
+      -0.0008935928344726562,
+      -0.00040733814239501953,
+      -0.0014814138412475586
+    ]
+  }
+}

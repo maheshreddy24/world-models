@@ -110,9 +110,10 @@ def episode_sums(model, probe, task, episode, emb, donors, ep, hist, horizon, st
         ({metric: (horizon,) float64}, number of windows), or (None, 0) if no window fits.
     """
     n = len(episode.blocks)
-    starts = torch.arange(0, n + 1 - hist - horizon + 1, stride)
-    if len(starts) == 0:
+    last_start = n + 1 - hist - horizon  # episodes vary in length (PushT); too short ones give no window
+    if last_start < 0:
         return None, 0
+    starts = torch.arange(0, last_start + 1, stride)
 
     blocks = episode.blocks.to(device)
     truth = episode.targets.to(device)  # (n+1, K)
@@ -330,11 +331,11 @@ def main() -> None:
     show = sorted({1, 2, 5, 10, 20, 30, 50, args.horizon} & set(res["horizon"]))
     sources = ", ".join(f"{k}: {b['episodes']} eps" for k, b in res["per_source"].items())
     print(f"\n{task.name}: {res['episodes']} unseen episodes, {res['windows']} windows ({sources})")
-    print(f"{'horizon':20s}" + "".join(f"{h:>8d}" for h in show))
+    print(f"{'horizon':20s}" + "".join(f"{h:>10d}" for h in show))
     rows = ["copy_mse", "tf_mse", "ar_mse", "shuf_mse", "accum_mse"]
     rows += [f"{q.name}_{c}" for q in task.quantities for c in ("floor", "tf", "ar", "shuf", "accum")]
     for k in rows:
-        print(f"{k:20s}" + "".join(f"{res[k][h - 1]:8.3f}" for h in show))
+        print(f"{k:20s}" + "".join(f"{res[k][h - 1]:10.3f}" for h in show))
     print(f"saved {out / 'rollout.json'} and rollout.png")
 
 

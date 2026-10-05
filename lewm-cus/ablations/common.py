@@ -98,7 +98,7 @@ def load_episode(reader: H5Reader, ep: int, task: Task, normalizer: Normalizer, 
     n = (int(reader.ep_len[ep]) - 1) // frameskip
     stop = start + n * frameskip + 1
     frames = reader.span("pixels", start, stop)[::frameskip]
-    obs = torch.from_numpy(reader.span("observation", start, stop)[::frameskip].astype(np.float32))
+    obs = torch.from_numpy(reader.span(task.state_key, start, stop)[::frameskip].astype(np.float32))
     return Episode(frames, task.targets(obs), action_blocks(reader, ep, normalizer, frameskip))
 
 

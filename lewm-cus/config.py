@@ -42,7 +42,7 @@ HOME = _find_home()
 
 # Tasks with a recording and a probe spec (src/tasks.py).
 MMBENCH_TASKS = ("acrobot-swingup", "cartpole-swingup", "pendulum-swingup", "reacher-easy")
-TASKS = (*MMBENCH_TASKS, "cube-single")
+TASKS = (*MMBENCH_TASKS, "cube-single", "pusht")
 
 # Per-task data settings, applied before the preset and the CLI overrides.
 # MMBench tasks need none: 260 episodes of 501 rows, 26 held out, default path.
@@ -50,6 +50,11 @@ TASK_DATA: dict[str, dict[str, Any]] = {
     # OGBench cube-single as recorded for LeWM: 10k expert episodes of 201 rows.
     "cube-single": {
         "data.h5_path": str(HOME / "datasets/ogbench/cube_single_expert.h5"),
+        "data.val_episodes": 1000,
+    },
+    # PushT as recorded for LeWM: 18,685 expert episodes of 49-246 rows, 2-d action.
+    "pusht": {
+        "data.h5_path": str(HOME / "datasets/pusht/pusht_expert_train.h5"),
         "data.val_episodes": 1000,
     },
 }

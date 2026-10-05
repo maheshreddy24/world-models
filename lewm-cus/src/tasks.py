@@ -42,16 +42,19 @@ def cos_sin(a: torch.Tensor) -> torch.Tensor:
 @dataclass(frozen=True)
 class Quantity:
     name: str
-    kind: str  # "angle" (radians, error in degrees) or "position" (metres, error in cm)
+    # "angle" (radians, error in degrees), "position" (metres, error in cm),
+    # or "pixel" (PushT workspace pixels, error in the same pixels)
+    kind: str
 
     @property
     def unit(self) -> str:
-        return "deg" if self.kind == "angle" else "cm"
+        return {"angle": "deg", "position": "cm", "pixel": "px"}[self.kind]
 
 
 class Task:
     name: str
     quantities: tuple[Quantity, ...]
+    state_key = "observation"  # the recording's column holding the true state
 
     def targets(self, obs: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -66,8 +69,10 @@ class Task:
         for i, q in enumerate(self.quantities):
             if q.kind == "angle":
                 out.append(wrap(diff[..., i]).abs() * (180.0 / math.pi))
-            else:
+            elif q.kind == "position":
                 out.append(diff[..., i].abs() * 100.0)
+            else:
+                out.append(diff[..., i].abs())
         return torch.stack(out, -1)
 
 
@@ -145,7 +150,34 @@ class Cube(Task):
         return diff.norm(dim=-1) * 100.0
 
 
-TASKS: dict[str, Task] = {t.name: t for t in (Acrobot(), Cartpole(), Pendulum(), Reacher(), Cube())}
+class PushT(Task):
+    """PushT (LeWM's recording): where the agent and the T-block are, and how the T is turned.
+
+    State: agent x, y; block x, y; block angle (0..2pi, no symmetry); agent
+    velocity x, y; positions in pixels of the 512 x 512 workspace. `read`
+    returns (..., 5) = agent xy, block xy, block angle; `errors` scores the two
+    positions as 2-D distances (px) and the angle in degrees.
+    """
+
+    name = "pusht"
+    quantities = (Quantity("agent", "pixel"), Quantity("block", "pixel"), Quantity("block_angle", "angle"))
+    state_key = "state"
+
+    def targets(self, obs):
+        return torch.cat([obs[..., 0:4], cos_sin(obs[..., 4])], -1)  # agent xy, block xy, cos/sin angle
+
+    def read(self, t):
+        return torch.cat([t[..., 0:4], torch.atan2(t[..., 5], t[..., 4])[..., None]], -1)
+
+    def errors(self, pred_targets, true_targets):
+        p, t = self.read(pred_targets), self.read(true_targets)
+        agent = (p[..., 0:2] - t[..., 0:2]).norm(dim=-1)
+        block = (p[..., 2:4] - t[..., 2:4]).norm(dim=-1)
+        angle = wrap(p[..., 4] - t[..., 4]).abs() * (180.0 / math.pi)
+        return torch.stack([agent, block, angle], -1)
+
+
+TASKS: dict[str, Task] = {t.name: t for t in (Acrobot(), Cartpole(), Pendulum(), Reacher(), Cube(), PushT())}
 
 
 def get_task(name: str) -> Task:
