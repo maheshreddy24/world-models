@@ -17,6 +17,9 @@ Observation layouts (DMControl, checked against the data):
     cartpole  [cart x, cos pole, sin pole, cart velocity, pole angular velocity]
     pendulum  [cos pole, sin pole, angular velocity]
     reacher   [shoulder angle, wrist angle, target - finger (x, y), 2 joint velocities]
+    cube      28-d: joint pos (6), joint vel (6), effector xyz (12:15), effector yaw
+              cos/sin, gripper opening, gripper contact, cube xyz (19:22), cube quat,
+              cube yaw cos/sin; positions stored as 10 x metres (x offset by 0.425)
 """
 
 from __future__ import annotations
@@ -119,7 +122,30 @@ class Reacher(Task):
         return torch.stack([shoulder, wrist, t[..., 4], t[..., 5]], -1)
 
 
-TASKS: dict[str, Task] = {t.name: t for t in (Acrobot(), Cartpole(), Pendulum(), Reacher())}
+class Cube(Task):
+    """OGBench cube-single: where the cube and the gripper are, as 3-D distances.
+
+    `read` returns both positions in metres, (..., 6) = cube xyz, effector xyz,
+    and `errors` scores each as the Euclidean distance between prediction and
+    truth, in cm.
+    """
+
+    name = "cube-single"
+    quantities = (Quantity("cube", "position"), Quantity("effector", "position"))
+    scale = 10.0  # observation positions are 10 x metres
+
+    def targets(self, obs):
+        return obs[..., [19, 20, 21, 12, 13, 14]]
+
+    def read(self, t):
+        return t / self.scale
+
+    def errors(self, pred_targets, true_targets):
+        diff = (self.read(pred_targets) - self.read(true_targets)).unflatten(-1, (2, 3))
+        return diff.norm(dim=-1) * 100.0
+
+
+TASKS: dict[str, Task] = {t.name: t for t in (Acrobot(), Cartpole(), Pendulum(), Reacher(), Cube())}
 
 
 def get_task(name: str) -> Task:

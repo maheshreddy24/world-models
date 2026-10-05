@@ -54,6 +54,10 @@ python run.py --task acrobot-swingup                    # everything, ViT, up to
 python run.py --task cartpole-swingup --stop-epoch 9
 python run.py --task reacher-easy --stages probe rollout --force   # redo some analyses
 python run.py --task pendulum-swingup --smoke           # few-minute end-to-end check
+python run.py --task cube-single                        # OGBench cube (LeWM's data, no conversion)
+
+python ablations/compare_rollouts.py checkpoints/cartpole-swingup/vit checkpoints/cube-single/vit \
+    --out ../rollout_comparison.png                     # one figure, a row per task
 ```
 
 `run.py` runs, for one task, and skips any stage whose output exists:
@@ -99,6 +103,13 @@ per-row reward reaches 2). Frames are 224x224 RGB.
 | cartpole-swingup | 5: cart x; cos, sin pole; cart velocity; pole angular velocity | 1: horizontal **force on the cart** | cart position (cm), pole angle (deg) |
 | pendulum-swingup | 3: cos, sin pole; angular velocity | 1: **torque at the pivot**, too weak to lift the pole directly (it has to swing) | pole angle (deg) |
 | reacher-easy | 6: shoulder angle, wrist angle (raw radians); finger-to-target x, y; 2 joint velocities | 2: torques at the **shoulder** and the **wrist** | shoulder, wrist (deg), to_target x, y (cm) |
+| cube-single | 28: arm joints (pos, vel), effector xyz + yaw, gripper opening + contact, cube xyz + quaternion + yaw | 5: effector **x, y, z, yaw** and **gripper** command | cube, effector position (3-D distance, cm) |
+
+**cube-single** is the OGBench recording LeWM itself trains on
+(`.stable_worldmodel/datasets/ogbench/cube_single_expert.h5`, used as is):
+10,000 expert episodes of 201 rows (41 latent frames), 1,000 held out, no
+separate val/test file. Its rollouts use a 30-step horizon and its probe and
+decoder every 10th training row (`TASK_ARGS` in run.py, `TASK_DATA` in config.py).
 
 - Every action is normalised to [-1, 1]. MMBench pads actions to 16 columns
   (noise in the `mixed`/`val`/`test` splits); only the real ones are kept.

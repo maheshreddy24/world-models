@@ -40,13 +40,34 @@ def _find_home() -> Path:
 
 HOME = _find_home()
 
-# MMBench2 tasks with a converted recording and a probe spec (src/tasks.py).
-TASKS = ("acrobot-swingup", "cartpole-swingup", "pendulum-swingup", "reacher-easy")
+# Tasks with a recording and a probe spec (src/tasks.py).
+MMBENCH_TASKS = ("acrobot-swingup", "cartpole-swingup", "pendulum-swingup", "reacher-easy")
+TASKS = (*MMBENCH_TASKS, "cube-single")
+
+# Per-task data settings, applied before the preset and the CLI overrides.
+# MMBench tasks need none: 260 episodes of 501 rows, 26 held out, default path.
+TASK_DATA: dict[str, dict[str, Any]] = {
+    # OGBench cube-single as recorded for LeWM: 10k expert episodes of 201 rows.
+    "cube-single": {
+        "data.h5_path": str(HOME / "datasets/ogbench/cube_single_expert.h5"),
+        "data.val_episodes": 1000,
+    },
+}
 
 
 def mmbench_h5(task: str, heldout: bool = False) -> Path:
     """Where datasets/prepare_mmbench.py writes a task's training (or val + test) table."""
     return HOME / "datasets" / "mmbench" / f"{task}{'-valtest' if heldout else ''}.h5"
+
+
+def task_h5(task: str) -> Path:
+    """A task's training recording."""
+    return Path(TASK_DATA.get(task, {}).get("data.h5_path", mmbench_h5(task)))
+
+
+def heldout_h5(task: str) -> Path | None:
+    """A task's separate never-trained-on recording, if it has one (MMBench val + test)."""
+    return mmbench_h5(task, heldout=True) if task in MMBENCH_TASKS else None
 
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +82,7 @@ class DataConfig:
     each row 2 simulator steps.
     """
 
-    task: str = "acrobot-swingup"  # one of config.TASKS
+    task: str = "acrobot-swingup"  # one of config.TASKS; brings its TASK_DATA settings
     h5_path: str | None = None  # None: mmbench_h5(task)
 
     # One latent step spans `frameskip` rows. Its action is the flattened block
@@ -349,14 +370,18 @@ def get_config(argv: list[str] | None = None, **extra_flags: Any) -> tuple[Confi
             parser.add_argument(flag, dest=name, default=default)
     args, overrides = parser.parse_known_args(argv)
 
-    cfg = Config.load(args.config) if args.config else Config()
-    for path, value in PRESETS[args.preset].items():
-        set_by_path(cfg, path, value)
+    pairs = []
     for item in overrides:
         if "=" not in item:
             raise SystemExit(f"cannot parse override {item!r}; expected key=value")
         path, value = item.split("=", 1)
-        set_by_path(cfg, path.lstrip("-"), value)
+        pairs.append((path.lstrip("-"), value))
+
+    # defaults -> the task's data settings -> preset -> CLI
+    cfg = Config.load(args.config) if args.config else Config()
+    task = dict(pairs).get("data.task", cfg.data.task)
+    for path, value in [*TASK_DATA.get(task, {}).items(), *PRESETS[args.preset].items(), *pairs]:
+        set_by_path(cfg, path, value)
 
     if cfg.data.h5_path is None:
         cfg.data.h5_path = str(mmbench_h5(cfg.data.task))

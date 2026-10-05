@@ -12,7 +12,7 @@ LeWM. See
 
 ## Current experiments
 
-LeWM (ViT-tiny trained from scratch) on four DMControl tasks from MMBench2,
+LeWM (ViT-tiny trained from scratch) on four DMControl tasks from MMBench2 and OGBench cube-single,
 one task at a time. For each: train the world model, fit a linear probe from
 the frozen latent to the true state, train a pixel decoder for visualisation,
 then measure how prediction error compounds over autoregressive rollouts
@@ -28,6 +28,7 @@ cd lewm-cus && python run.py --task cartpole-swingup    # data -> train -> probe
 | cartpole-swingup | 5: cart x, cos/sin pole, cart velocity, pole angular velocity | 1: horizontal **force on the cart** | cart position (cm), pole angle (deg) |
 | pendulum-swingup | 3: cos/sin pole, angular velocity | 1: **torque at the pivot**, too weak to lift the pole directly | pole angle (deg) |
 | reacher-easy | 6: shoulder, wrist angle; finger-to-target x, y; 2 joint velocities | 2: torques at the **shoulder** and **wrist** | shoulder, wrist (deg), to_target x, y (cm) |
+| cube-single (OGBench, LeWM's data) | 28: arm joints, effector pose, gripper, cube pose | 5: effector **x, y, z, yaw** and **gripper** | cube, effector position (cm) |
 
 - **Data per task:** 260 training episodes of 501 rows (expert, mixed-small,
   mixed-large, zeros), 26 held out; 40 more (val + test) never trained on.
