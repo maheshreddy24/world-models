@@ -15,6 +15,7 @@ and how prediction error compounds over autoregressive rollouts.
 
 ```
 run.py                  one task end to end: data -> train -> probe -> decoder -> rollout
+compare/                regulariser comparison on TwoRoom / PushT (compare/run.py)
 config.py               every setting, as dataclasses + presets; data.task picks the task
 train.py                train the world model
 datasets/
@@ -25,6 +26,10 @@ ablations/
   probe.py              linear probe: latent -> the task's angles / positions
   decoder.py            pixel decoder on the frozen latents (for looking only)
   rollout.py            copy / teacher-forced / autoregressive / shuffled-action rollouts
+  probe_skill.py        skill of the rollout probe errors vs holding the true state
+  probe_pred_vs_enc.py  probe on predicted latents vs after decode -> re-encode
+  roundtrip_samples.py  frames: real | dec(pred) | dec(enc(dec(pred)))
+  plan_cartpole.py      CEM MPC in latent space on cartpole-swingup, in DMControl
 src/
   tasks.py              per task: what the state means and what the probe reads
   data/                 HDF5 reader, training windows, z-score stats, pixel transform
@@ -55,9 +60,6 @@ python run.py --task cartpole-swingup --stop-epoch 9
 python run.py --task reacher-easy --stages probe rollout --force   # redo some analyses
 python run.py --task pendulum-swingup --smoke           # few-minute end-to-end check
 python run.py --task cube-single                        # OGBench cube (LeWM's data, no conversion)
-
-python ablations/compare_rollouts.py checkpoints/cartpole-swingup/vit checkpoints/cube-single/vit \
-    --out ../rollout_comparison.png                     # one figure, a row per task
 ```
 
 `run.py` runs, for one task, and skips any stage whose output exists:
@@ -86,7 +88,9 @@ Every stage is also a plain script, e.g.
 `python train.py --preset vit data.task=cartpole-swingup` or
 `python ablations/probe.py --ckpt checkpoints/cartpole-swingup/vit/epoch_006.pt`.
 Presets: `vit` (LeWM, ViT-tiny from scratch + SIGReg), `dino` (frozen DINOv2
-patches, no SIGReg), `oracle` (MLP on the true state), `debug`.
+patches, no SIGReg), `dino_cls` (frozen DINOv2 CLS token, no SIGReg),
+`vit_ema` (ViT-tiny from scratch, EMA target instead of SIGReg), `oracle` (MLP
+on the true state), `debug`.
 
 ## Experiments
 
@@ -117,6 +121,38 @@ decoder every 10th training row (`TASK_ARGS` in run.py, `TASK_DATA` in config.py
   reacher's shoulder winds past it), positions as is (src/tasks.py).
 - The world model never sees the oracle state with the `vit` preset; it is only
   the probe's target.
+
+## Regulariser comparison (TwoRoom, PushT)
+
+`compare/run.py` trains six world models per task on LeWM's own recordings
+(`quentinll/lewm-tworooms`, `quentinll/lewm-pusht`) and compares them: SIGReg at
+λ 0.01 and 0.2, Sub-JEPA (λ 0.09, K = 32 / 16), VISReg (convex form, λ 0.6), an
+EMA target, and frozen DINOv2 CLS. Write-up: `compare/WRITEUP.md`.
+
+```bash
+bash ../setup.sh                              # fresh machine: conda env, torch, requirements.txt
+python compare/run.py                         # setup -> data -> train -> analyse -> cem -> report
+python compare/run.py --tasks tworoom         # one task
+python compare/run.py --stages analyse cem report --epoch 4   # an earlier epoch, reported apart
+python compare/run.py --smoke                 # minutes-long end-to-end check
+```
+
+Two training recipes (`--recipe`), each with its own output root:
+
+| | `subjepa` (default) | `short` (first experiment) |
+|---|---|---|
+| steps | 10 full passes over 90% of all clips: TwoRoom 5,138 / PushT 13,933 per epoch | 10 × 2000 |
+| encoder | HF ViT-tiny, 14 px patches (identical to LeWM's: its released weights load and reproduce its outputs exactly) | timm ViT-tiny/16 |
+| optimiser | AdamW 5e-5, wd 1e-3 on all parameters, warm-up from 0 over 1%, cosine to 0, for every model incl. `dino_cls` | same for ViT models; DINO-WM's for `dino_cls` |
+| outputs | `checkpoints/compare_subjepa/` | `checkpoints/compare/` |
+
+Per model: CEM success rate (LeWM's protocol, Sub-JEPA's six seeds), probe error
+vs horizon, off-manifold distance vs horizon, folding (saturation distance d80,
+participation ratio, trustworthiness / continuity) and local stretch; per task:
+Spearman ρ of folding with error at each horizon, across and within models.
+Definitions: `compare/analysis.py`. Every epoch's checkpoint is kept (weights only
+under `subjepa`, plus a rolling `resume.pt`). `loss.reg_type` (`sigreg` | `subjepa`
+| `visreg`) picks the regulariser in `train.py` (src/models/regularizers.py).
 
 ## Hyperparameters
 

@@ -88,7 +88,8 @@ class SequenceDataset(Dataset):
     """Strided windows of `seq_len` latent steps that never cross an episode boundary.
 
     Items: `{obs_key: (seq_len, ...), "action": (seq_len, frameskip * A)}`.
-    Pixels go through `image_transform`; vectors and actions are z-scored.
+    Pixels go through `image_transform`, or stay uint8 (seq_len, H, W, 3) when it
+    is None (the model normalises them on the GPU); vectors and actions are z-scored.
     """
 
     def __init__(
@@ -101,24 +102,28 @@ class SequenceDataset(Dataset):
         normalizer: Normalizer | None = None,
         image_transform: ImageTransform | None = None,
         stride: int = 1,
+        to_last_row: bool = False,
     ):
         self.reader = reader
+        self.to_last_row = to_last_row
         self.seq_len = seq_len
         self.frameskip = frameskip
         self.obs_key = obs_key
         self.normalizer = normalizer
-        self.image_transform = image_transform or ImageTransform()
+        self.image_transform = image_transform
         self.span = seq_len * frameskip  # rows per window
         self.starts = self._window_starts(np.asarray(episodes), stride)
 
     def _window_starts(self, episodes: np.ndarray, stride: int) -> np.ndarray:
         """Global start rows of every window that fits inside its episode.
 
-        The last row of an episode has no action (NaN), so windows stop one row short.
+        The last row of an episode has no action (NaN), so windows stop one row short, unless
+        `to_last_row`: then, as stable-worldmodel's clips, a window may end on it (the NaN action
+        becomes 0 and only feeds the last action block, which the loss never uses).
         """
         starts = []
         for ep in episodes:
-            last = int(self.reader.ep_len[ep]) - 1 - self.span
+            last = int(self.reader.ep_len[ep]) - self.span - (0 if self.to_last_row else 1)
             if last >= 0:
                 starts.append(int(self.reader.ep_offset[ep]) + np.arange(0, last + 1, stride))
         if not starts:
@@ -134,7 +139,7 @@ class SequenceDataset(Dataset):
 
         obs = self.reader.span(self.obs_key, start, stop)[:: self.frameskip]
         if self.obs_key in RAW_COLUMNS:
-            obs = self.image_transform(obs)
+            obs = self.image_transform(obs) if self.image_transform else torch.from_numpy(np.ascontiguousarray(obs))
         else:
             obs = torch.from_numpy(self._normalize(self.obs_key, obs))
 
@@ -192,18 +197,21 @@ def get_normalizer(cfg, reader: H5Reader, keys) -> Normalizer:
 def build_datasets(cfg, train_stride: int | None = None, val_stride: int | None = None):
     """The training and validation windows of `cfg.data.h5_path`.
 
+    Pixels come out as uint8: a float batch of 128 windows is ~300 MB, and with
+    a few workers prefetching, that crowds the recording out of the page cache.
+
     Returns:
         (train_set, val_set, reader, normalizer). The caller closes the reader.
     """
     reader = H5Reader(cfg.data.h5_path, rdcc_mb=cfg.data.rdcc_mb)
     normalizer = get_normalizer(cfg, reader, (cfg.data.obs_key, "action"))
-    transform = ImageTransform(cfg.data.img_size)
     train_eps, val_eps = split_episodes(reader.num_episodes, cfg.data.val_episodes, cfg.seed, cfg.data.max_episodes)
 
     def make(episodes, stride):
         return SequenceDataset(
             reader, episodes, cfg.data.seq_len, cfg.data.frameskip,
-            obs_key=cfg.data.obs_key, normalizer=normalizer, image_transform=transform, stride=stride,
+            obs_key=cfg.data.obs_key, normalizer=normalizer, image_transform=None, stride=stride,
+            to_last_row=getattr(cfg.data, "window_to_last_row", False),
         )
 
     train_set = make(train_eps, cfg.data.train_stride if train_stride is None else train_stride)

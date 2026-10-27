@@ -7,6 +7,7 @@
 /.stable_worldmodel
 /datasets
 /data
+/lewm-cus/data/
 *.h5
 *.csv
 
@@ -18,12 +19,19 @@ checkpoints/exp_*/
 wandb/
 outputs/
 
+# --- experiment results (metrics, logs, plots, rollouts) ---
+# Everything under checkpoints/ is ignored except the run configs,
+# so how experiments are run stays tracked but their results do not.
+/lewm-cus/checkpoints/**
+!/lewm-cus/checkpoints/**/
+!/lewm-cus/checkpoints/**/config.json
+/lewm-cus/temp/
+*.log
+/rollout_*.png
+
 # --- media ---
 /videos
 *.mp4
-
-# --- files moved out of the codebase ---
-lewm-cus/temp/
 
 # --- python ---
 __pycache__/

@@ -42,7 +42,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import mmbench_h5  # noqa: E402
+from config import RAW_DATA, mmbench_h5  # noqa: E402
 from inspect_mmbench import Frames, load_td, used_cols  # noqa: E402  (same folder)
 
 TRAIN_SPLITS = ["expert", "mixed-small", "mixed-large", "zeros"]
@@ -59,7 +59,7 @@ def shift_to_taken(x: torch.Tensor, ep: torch.Tensor) -> np.ndarray:
     return out
 
 
-def convert(task: str, splits: list[str], out: Path, root: Path = Path("/home/world-models/data"),
+def convert(task: str, splits: list[str], out: Path, root: Path = RAW_DATA,
             size: int = 224, action_dim: int | None = None, overwrite: bool = False) -> Path:
     """Write the HDF5 table of `task`'s `splits` to `out`."""
     if out.exists() and not overwrite:
@@ -129,7 +129,7 @@ def convert(task: str, splits: list[str], out: Path, root: Path = Path("/home/wo
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--root", type=Path, default=Path("/home/world-models/data"))
+    p.add_argument("--root", type=Path, default=RAW_DATA)
     p.add_argument("--task", default="acrobot-swingup")
     p.add_argument("--heldout", action="store_true", help="convert val + test instead of the training splits")
     p.add_argument("--splits", nargs="+", default=None, help="explicit splits (overrides --heldout)")

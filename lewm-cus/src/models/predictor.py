@@ -69,11 +69,13 @@ class ARPredictor(nn.Module):
         dim_head: int = 64,
         mlp_dim: int = 768,
         dropout: float = 0.0,
+        pos_init_std: float = 0.02,
     ):
         super().__init__()
         self.num_frames = num_frames
         self.num_patches = num_patches
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, input_dim) * 0.02)  # which frame
+        # which frame; LeWM initialises it with plain torch.randn (std 1)
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, input_dim) * pos_init_std)
         # Which token within a frame. Only created for P > 1, so checkpoints of
         # pooled encoders keep exactly the parameters they were saved with.
         self.patch_pos_embedding = (

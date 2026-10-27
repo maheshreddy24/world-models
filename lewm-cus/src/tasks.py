@@ -177,7 +177,31 @@ class PushT(Task):
         return torch.stack([agent, block, angle], -1)
 
 
-TASKS: dict[str, Task] = {t.name: t for t in (Acrobot(), Cartpole(), Pendulum(), Reacher(), Cube(), PushT())}
+class TwoRoom(Task):
+    """TwoRoom (LeWM's recording): where the agent is.
+
+    `proprio` is the agent's x, y in pixels of the environment image; it is all
+    the frame shows that moves (walls, door and target stay put). `errors`
+    scores it as a 2-D distance (px).
+    """
+
+    name = "tworoom"
+    quantities = (Quantity("agent", "pixel"),)
+    state_key = "proprio"
+
+    def targets(self, obs):
+        return obs[..., 0:2]
+
+    def read(self, t):
+        return t
+
+    def errors(self, pred_targets, true_targets):
+        return (pred_targets - true_targets).norm(dim=-1, keepdim=True)
+
+
+TASKS: dict[str, Task] = {
+    t.name: t for t in (Acrobot(), Cartpole(), Pendulum(), Reacher(), Cube(), PushT(), TwoRoom())
+}
 
 
 def get_task(name: str) -> Task:

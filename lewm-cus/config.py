@@ -40,9 +40,14 @@ def _find_home() -> Path:
 
 HOME = _find_home()
 
+# Raw MMBench2 download (`hf download nicklashansen/mmbench2 ...`): the repo's data/
+# if it has one, else the original machine's location.
+_REPO = Path(__file__).resolve().parent
+RAW_DATA = _REPO / "data" if (_REPO / "data").is_dir() else Path("/home/world-models/data")
+
 # Tasks with a recording and a probe spec (src/tasks.py).
 MMBENCH_TASKS = ("acrobot-swingup", "cartpole-swingup", "pendulum-swingup", "reacher-easy")
-TASKS = (*MMBENCH_TASKS, "cube-single", "pusht")
+TASKS = (*MMBENCH_TASKS, "cube-single", "pusht", "tworoom")
 
 # Per-task data settings, applied before the preset and the CLI overrides.
 # MMBench tasks need none: 260 episodes of 501 rows, 26 held out, default path.
@@ -55,6 +60,11 @@ TASK_DATA: dict[str, dict[str, Any]] = {
     # PushT as recorded for LeWM: 18,685 expert episodes of 49-246 rows, 2-d action.
     "pusht": {
         "data.h5_path": str(HOME / "datasets/pusht/pusht_expert_train.h5"),
+        "data.val_episodes": 1000,
+    },
+    # TwoRoom as recorded for LeWM (quentinll/lewm-tworooms): 10,000 episodes, ~92 rows on average, 2-d action.
+    "tworoom": {
+        "data.h5_path": str(HOME / "datasets/tworoom/tworoom.h5"),
         "data.val_episodes": 1000,
     },
 }
@@ -113,6 +123,10 @@ class DataConfig:
 
     rdcc_mb: int = 256  # HDF5 chunk cache per dataloader worker
 
+    # True: a window may end on an episode's last row (whose action is NaN, read as 0), as
+    # stable-worldmodel's clips do; its last action block is never used by the loss.
+    window_to_last_row: bool = False
+
     @property
     def seq_len(self) -> int:
         """Latent steps per training sequence."""
@@ -124,7 +138,7 @@ class ModelConfig:
     """LeWM = encoder + action encoder + autoregressive latent predictor."""
 
     # "vit"  pixels, ViT trained from scratch (LeWM)
-    # "dino" pixels, frozen pretrained DINOv2 patch features (DINO-WM)
+    # "dino" pixels, frozen pretrained DINOv2 features (DINO-WM), from Hugging Face
     # "mlp"  the oracle state
     encoder: str = "vit"
     freeze_encoder: bool = False  # no gradients, always in eval mode
@@ -132,9 +146,13 @@ class ModelConfig:
     vit_name: str = "vit_tiny_patch16_224"
     vit_pretrained: bool = False
     vit_pool: str = "cls"  # "cls" or "mean"
+    # "timm" (timm.create_model(vit_name)) or "hf": a transformers ViTModel built like
+    # stable_pretraining.backbone.utils.vit_hf, the encoder LeWM and Sub-JEPA train
+    vit_impl: str = "timm"
+    vit_patch: int | None = None  # override the patch size (LeWM / Sub-JEPA: 14); None: vit_name's
 
     # Frames are resized to dino_img_size inside the encoder.
-    dino_name: str = "dinov2_vits14"  # torch.hub name; 384 wide
+    dino_name: str = "facebook/dinov2-small"  # Hugging Face id; 384 wide
     dino_tokens: str = "patch"  # "patch": a 14x14 token grid | "cls": one vector
     dino_img_size: int = 196  # multiple of the 14px patch
 
@@ -143,7 +161,8 @@ class ModelConfig:
     embed_dim: int = 192  # = encoder width (vit-tiny 192, dinov2_vits14 384)
 
     # action encoder
-    act_smooth_dim: int = 64
+    act_smooth_dim: int = 64  # LeWM / Sub-JEPA: 10 (Embedder's default)
+    pos_init_std: float = 0.02  # predictor frame position embedding init std (LeWM: 1.0, torch.randn)
     act_mlp_scale: int = 4
 
     # predictor (widths from the LeWM reference, independent of embed_dim)
@@ -153,8 +172,9 @@ class ModelConfig:
     mlp_dim: int = 2048
     dropout: float = 0.1
 
-    # MLP heads after the encoder and after the predictor. Must be off without
-    # SIGReg: a trainable head can collapse even on top of a frozen encoder.
+    # MLP heads after the encoder and after the predictor. Must be off when
+    # nothing prevents collapse (no SIGReg, no EMA target): a trainable head can
+    # collapse even on top of a frozen encoder.
     use_projector: bool = True
     proj_hidden: int = 2048
     # "batch" as in the reference. Its running statistics do not match eval
@@ -175,10 +195,22 @@ class OptimConfig:
     warmup_epochs: float = 2.0
     min_lr_scale: float = 0.01  # final lr = lr * min_lr_scale
     grad_clip: float = 1.0
+    # True: weight decay on every parameter (stable-pretraining's AdamW without exclude_bias_norm);
+    # False: not on biases, norms and position embeddings
+    decay_all: bool = False
+    lr_start_zero: bool = False  # True: the first step runs at the warm-up's start LR (0), as stable-pretraining
+    # False: random windows with replacement each epoch; True: shuffled passes (no repeats until all are seen)
+    sample_without_replacement: bool = False
+    # "all": every epoch_NNN.pt carries the optimiser state; "resume": epoch files are weights only
+    # (~3x smaller) and one rolling resume.pt holds the full state
+    ckpt_mode: str = "all"
     amp_dtype: str = "bf16"  # "bf16" | "fp16" | "off"
 
-    num_workers: int = 12
-    prefetch_factor: int = 4
+    # A float batch of 128 windows is ~300 MB, and every worker holds
+    # prefetch_factor of them: 12 x 4 does not fit a 15 GB machine. Loading is
+    # CPU-bound, so more workers than cores does not help either.
+    num_workers: int = min(12, os.cpu_count() or 1)
+    prefetch_factor: int = 2
     persistent_workers: bool = True
     pin_memory: bool = True
 
@@ -194,17 +226,35 @@ class OptimConfig:
 
 @dataclass
 class LossConfig:
-    """Next-embedding prediction, plus SIGReg when the target could collapse."""
+    """Next-embedding prediction, plus something that stops a trainable target collapsing.
 
-    use_sigreg: bool = True
-    sigreg_weight: float = 0.09
+    Either SIGReg (LeWM) on the online embedding, or an EMA target
+    (BYOL / I-JEPA): the targets come from a slowly moving copy of the encoder
+    and projector, with no gradient, and the predictor's head breaks the symmetry.
+    """
+
+    use_sigreg: bool = True  # apply the regulariser named by reg_type
+    # "sigreg" (LeWM), "subjepa" (SIGReg in random subspaces), "visreg" (scale + sliced
+    # Wasserstein shape + centre); see src/models/regularizers.py
+    reg_type: str = "sigreg"
+    sigreg_weight: float = 0.09  # lambda of whichever regulariser reg_type names
+    pred_weight: float = 1.0  # weight of the prediction loss (VISReg's convex form: 1 - lambda)
     sigreg_knots: int = 17
     sigreg_proj: int = 1024
+    subspaces: int = 32  # subjepa: K subspaces of embed_dim / K dimensions
+    subspace_init: str = "orthogonal_frozen"
+    visreg_proj: int = 2048  # visreg: sliced Wasserstein directions
+
+    ema: bool = False
+    # target <- m * target + (1 - m) * online after every step, m going
+    # linearly from ema_momentum to ema_momentum_end over the optim.epochs schedule.
+    ema_momentum: float = 0.996
+    ema_momentum_end: float = 1.0
 
 
 @dataclass
 class WandbConfig:
-    enabled: bool = False
+    enabled: bool = True
     project: str = "lewm-cus"
     entity: str | None = None
     name: str | None = None
@@ -239,9 +289,13 @@ class Config:
             raise ValueError("the mlp encoder needs data.obs_key='observation'")
         if self.model.encoder in ("vit", "dino") and self.data.obs_key != "pixels":
             raise ValueError(f"the {self.model.encoder} encoder needs data.obs_key='pixels'")
-        if not self.loss.use_sigreg and (not self.model.freeze_encoder or self.model.use_projector):
+        if self.loss.ema and self.model.freeze_encoder:
+            raise ValueError("loss.ema=true needs a trainable encoder (model.freeze_encoder=false)")
+        if not self.loss.use_sigreg and not self.loss.ema and (
+            not self.model.freeze_encoder or self.model.use_projector
+        ):
             raise ValueError(
-                "loss.use_sigreg=false needs a target that cannot collapse: set "
+                "loss.use_sigreg=false needs a target that cannot collapse: set loss.ema=true, or "
                 "model.freeze_encoder=true and model.use_projector=false"
             )
 
@@ -279,6 +333,24 @@ PRESETS: dict[str, dict[str, Any]] = {
         "loss.use_sigreg": False,
         "optim.batch_size": 32,  # DINO-WM's batch and predictor lr
         "optim.lr": 5e-4,
+    },
+    # DINO-WM with one vector per frame: the CLS token of frozen DINOv2 ViT-S/14
+    # (facebook/dinov2-small). Same batch as vit (one token is cheap), DINO-WM's
+    # predictor lr.
+    "dino_cls": {
+        "model.encoder": "dino",
+        "model.dino_tokens": "cls",
+        "model.freeze_encoder": True,
+        "model.embed_dim": 384,
+        "model.use_projector": False,
+        "loss.use_sigreg": False,
+        "optim.lr": 5e-4,
+    },
+    # LeWM with an EMA target instead of SIGReg: ViT-tiny from scratch predicts
+    # the next embedding of an EMA copy of itself (encoder + projector).
+    "vit_ema": {
+        "loss.use_sigreg": False,
+        "loss.ema": True,
     },
     # Oracle: an MLP over the task's true state.
     "oracle": {

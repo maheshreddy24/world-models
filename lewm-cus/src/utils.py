@@ -48,7 +48,8 @@ def build_optimizer(model: torch.nn.Module, cfg) -> torch.optim.Optimizer:
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if param.ndim <= 1 or name.endswith(".pos_embedding") or "pos_embed" in name or "cls_token" in name:
+        exempt = param.ndim <= 1 or name.endswith(".pos_embedding") or "pos_embed" in name or "cls_token" in name
+        if exempt and not getattr(cfg.optim, "decay_all", False):
             no_decay.append(param)
         else:
             decay.append(param)
@@ -62,13 +63,17 @@ def build_optimizer(model: torch.nn.Module, cfg) -> torch.optim.Optimizer:
 class WarmupCosine:
     """Linear warmup then cosine decay, stepped once per optimiser step."""
 
-    def __init__(self, optimizer, base_lr: float, warmup_steps: int, total_steps: int, min_lr_scale: float = 0.01):
+    def __init__(self, optimizer, base_lr: float, warmup_steps: int, total_steps: int, min_lr_scale: float = 0.01,
+                 start_zero: bool = False):
         self.optimizer = optimizer
         self.base_lr = base_lr
         self.warmup_steps = max(1, warmup_steps)
         self.total_steps = max(total_steps, self.warmup_steps + 1)
         self.min_lr = base_lr * min_lr_scale
         self.step_count = 0
+        if start_zero:  # stable-pretraining: step k runs at base_lr * k / warmup, so the first at 0
+            for group in self.optimizer.param_groups:
+                group["lr"] = 0.0
 
     def step(self) -> float:
         self.step_count += 1

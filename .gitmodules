@@ -1,0 +1,6 @@
+[submodule "sub-jepa"]
+	path = sub-jepa
+	url = https://github.com/intcomp/sub-jepa
+[submodule "dino_wm"]
+	path = dino_wm
+	url = https://github.com/gaoyuezhou/dino_wm

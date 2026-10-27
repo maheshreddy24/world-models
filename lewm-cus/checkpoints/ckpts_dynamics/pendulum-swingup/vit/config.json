@@ -1,0 +1,83 @@
+{
+  "run_name": "pendulum-swingup_vit",
+  "out_dir": "/home/world-models/lewm-cus/checkpoints/pendulum-swingup",
+  "exp_id": "vit",
+  "seed": 3072,
+  "device": "cuda",
+  "compile": false,
+  "data": {
+    "task": "pendulum-swingup",
+    "h5_path": "/home/world-models/.stable_worldmodel/datasets/mmbench/pendulum-swingup.h5",
+    "frameskip": 5,
+    "history": 3,
+    "num_preds": 1,
+    "img_size": 224,
+    "obs_key": "pixels",
+    "train_stride": 2,
+    "val_stride": 5,
+    "max_episodes": null,
+    "val_episodes": 26,
+    "stats_path": null,
+    "stats_max_rows": 200000,
+    "rdcc_mb": 256
+  },
+  "model": {
+    "encoder": "vit",
+    "freeze_encoder": false,
+    "vit_name": "vit_tiny_patch16_224",
+    "vit_pretrained": false,
+    "vit_pool": "cls",
+    "dino_name": "dinov2_vits14",
+    "dino_tokens": "patch",
+    "dino_img_size": 196,
+    "mlp_hidden": 512,
+    "embed_dim": 192,
+    "act_smooth_dim": 64,
+    "act_mlp_scale": 4,
+    "depth": 6,
+    "heads": 16,
+    "dim_head": 64,
+    "mlp_dim": 2048,
+    "dropout": 0.1,
+    "use_projector": true,
+    "proj_hidden": 2048,
+    "proj_norm": "batch"
+  },
+  "optim": {
+    "epochs": 100,
+    "stop_epoch": 6,
+    "batch_size": 128,
+    "lr": 5e-05,
+    "weight_decay": 0.001,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "warmup_epochs": 2.0,
+    "min_lr_scale": 0.01,
+    "grad_clip": 1.0,
+    "amp_dtype": "bf16",
+    "num_workers": 12,
+    "prefetch_factor": 4,
+    "persistent_workers": true,
+    "pin_memory": true,
+    "steps_per_epoch": 2000,
+    "val_steps": 100,
+    "log_every": 20,
+    "ckpt_every": 1,
+    "select_metric": "pred_vs_static"
+  },
+  "loss": {
+    "use_sigreg": true,
+    "sigreg_weight": 0.09,
+    "sigreg_knots": 17,
+    "sigreg_proj": 1024
+  },
+  "wandb": {
+    "enabled": false,
+    "project": "lewm-cus",
+    "entity": null,
+    "name": null,
+    "mode": "online"
+  }
+}

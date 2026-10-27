@@ -56,6 +56,7 @@ def main() -> None:
     p.add_argument("--fg-weight", type=float, default=10.0, help="extra loss weight where a pole can be")
     p.add_argument("--latent-noise", type=float, default=0.0,
                    help="gaussian noise on the standardised latent while training (0 = clean)")
+    p.add_argument("--out", default="decoder", help="output folder next to the checkpoint")
     p.add_argument("--device", default="cuda")
     args = p.parse_args()
 
@@ -113,7 +114,7 @@ def main() -> None:
         "mean_frame_psnr": float(psnr(mean_img.cpu().expand_as(truth), truth).mean()),
     }
 
-    out = analysis_dir(args.ckpt, "decoder")
+    out = analysis_dir(args.ckpt, args.out)
     dec.save(out / "decoder.pt", ckpt=str(args.ckpt))
     save_json(out / "decoder.json", results)
     pick = torch.linspace(0, len(Zv) - 1, 10).long()

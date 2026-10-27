@@ -45,6 +45,10 @@ def load_world_model(ckpt: str | Path, device, random_init: bool = False):
         config, and the task spec of the recording it was trained on.
     """
     model, cfg = load_model(ckpt, device=str(device), random_init=random_init)
+    if not Path(cfg.data.h5_path).exists():  # trained on another machine: this one's copy of the task's data
+        from config import task_h5
+
+        cfg.data.h5_path = str(task_h5(cfg.data.task))
     if cfg.data.obs_key != "pixels":
         sys.exit("the analyses need a pixel model (presets vit, dino)")
     if any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in model.modules()):

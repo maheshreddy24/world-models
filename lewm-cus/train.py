@@ -2,6 +2,8 @@
 
     python train.py data.task=cartpole-swingup   # LeWM: ViT-tiny from pixels, with SIGReg
     python train.py --preset dino                # DINO-WM: frozen DINOv2 patch features
+    python train.py --preset dino_cls            # frozen DINOv2 CLS token
+    python train.py --preset vit_ema             # ViT-tiny with an EMA target instead of SIGReg
     python train.py --preset oracle              # MLP over the task's true state
     python train.py --preset debug               # 20-second smoke test
     python train.py optim.lr=1e-4 model.depth=8  # override anything in config.py
@@ -10,7 +12,7 @@
 run.py drives this (plus the analyses) for one task.
 
 The objective is next-embedding prediction; with a trainable encoder, SIGReg
-keeps the embedding Gaussian so it cannot collapse. Watch `emb_std` (heading to
+(or an EMA target, `loss.ema`) keeps it from collapsing. Watch `emb_std` (heading to
 zero means collapse) and `pred_vs_static` (below 1 means the predictor beats
 "nothing moves"). Each epoch writes `<run dir>/epoch_NNN.pt`.
 """
@@ -29,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import get_config
 from src.data import build_datasets
-from src.models import SIGReg, build_model
+from src.models import build_model, build_regularizer
 from src.utils import (
     Logger,
     Meters,
@@ -64,8 +66,11 @@ def make_loaders(cfg, train_set, val_set):
 
     sampler = None
     if cfg.optim.steps_per_epoch:
+        # without replacement: shuffled passes over all windows (a new permutation whenever one
+        # runs out), as an epoch of a shuffled DataLoader; with replacement: independent draws
         sampler = RandomSampler(
-            train_set, replacement=True, num_samples=cfg.optim.steps_per_epoch * cfg.optim.batch_size
+            train_set, replacement=not getattr(cfg.optim, "sample_without_replacement", False),
+            num_samples=cfg.optim.steps_per_epoch * cfg.optim.batch_size,
         )
     # Training drops the ragged tail so every step sees a full batch; validation
     # keeps it, or a val split smaller than one batch would yield no batches at
@@ -91,7 +96,13 @@ def find_latest_checkpoint(out_dir: Path) -> Path | None:
     return None
 
 
-def run_epoch(model, sigreg, loader, cfg, device, autocast_dtype, optimizer=None, scheduler=None, logger=None, epoch=0, global_step=0, max_steps=None):
+def ema_momentum(cfg, step: int, total_steps: int) -> float:
+    """EMA target momentum at `step`: linear from loss.ema_momentum to loss.ema_momentum_end."""
+    frac = min(step / max(total_steps, 1), 1.0)
+    return cfg.loss.ema_momentum + frac * (cfg.loss.ema_momentum_end - cfg.loss.ema_momentum)
+
+
+def run_epoch(model, sigreg, loader, cfg, device, autocast_dtype, optimizer=None, scheduler=None, logger=None, epoch=0, global_step=0, max_steps=None, total_steps=1):
     """One pass. Training when `optimizer` is given, validation otherwise."""
     training = optimizer is not None
     model.train(training)
@@ -110,7 +121,7 @@ def run_epoch(model, sigreg, loader, cfg, device, autocast_dtype, optimizer=None
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
         with torch.autocast("cuda", dtype=autocast_dtype, enabled=autocast_dtype is not None):
-            out = model.loss(batch, sigreg, cfg.loss.sigreg_weight)
+            out = model.loss(batch, sigreg, cfg.loss.sigreg_weight, cfg.loss.pred_weight)
 
         if training:
             optimizer.zero_grad(set_to_none=True)
@@ -118,8 +129,12 @@ def run_epoch(model, sigreg, loader, cfg, device, autocast_dtype, optimizer=None
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optim.grad_clip)
             optimizer.step()
             lr = scheduler.step()
-            global_step += 1
             out = {**out, "grad_norm": grad_norm, "lr": lr}
+            if cfg.loss.ema:
+                momentum = ema_momentum(cfg, global_step, total_steps)
+                model.update_target(momentum)
+                out["ema_momentum"] = momentum
+            global_step += 1
 
         stats = {k: float(v.detach()) if torch.is_tensor(v) else float(v) for k, v in out.items()}
         meters.update(stats)
@@ -169,24 +184,28 @@ def main(argv=None) -> None:
 
     # -- model ------------------------------------------------------------ #
     model = build_model(cfg, action_dim=action_dim, state_dim=state_dim).to(device)
-    sigreg = SIGReg(cfg.loss.sigreg_knots, cfg.loss.sigreg_proj).to(device) if cfg.loss.use_sigreg else None
+    sigreg = build_regularizer(cfg)
+    if sigreg is not None:
+        sigreg = sigreg.to(device)
     if cfg.compile:
         model = torch.compile(model)
     params = count_params(model)
     print(
         f"model | {cfg.model.encoder} encoder{' (frozen)' if cfg.model.freeze_encoder else ''}"
-        f", sigreg {'on' if sigreg is not None else 'off'}"
+        f", regulariser {cfg.loss.reg_type if sigreg is not None else 'off'}, ema target {'on' if cfg.loss.ema else 'off'}"
         f", {params['total_M']:.1f}M params ({params['trainable_M']:.1f}M trainable) -> {run_dir}"
     )
 
     optimizer = build_optimizer(model, cfg)
     steps_per_epoch = cfg.optim.steps_per_epoch or len(train_loader)
+    total_steps = cfg.optim.epochs * steps_per_epoch
     scheduler = WarmupCosine(
         optimizer,
         base_lr=cfg.optim.lr,
         warmup_steps=int(cfg.optim.warmup_epochs * steps_per_epoch),
-        total_steps=cfg.optim.epochs * steps_per_epoch,
+        total_steps=total_steps,
         min_lr_scale=cfg.optim.min_lr_scale,
+        start_zero=getattr(cfg.optim, "lr_start_zero", False),
     )
 
     # -- resume ----------------------------------------------------------- #
@@ -215,17 +234,20 @@ def main(argv=None) -> None:
         validation, but selection no longer decides what gets written.
         """
         path = run_dir / f"epoch_{epoch:03d}.pt"
-        save_checkpoint(
-            path, model, cfg, optimizer, scheduler,
-            epoch=epoch, step=global_step,
-            extra={
-                "action_dim": action_dim,
-                "state_dim": state_dim,
-                "best_val": best_val,
-                "best_epoch": best_epoch,
-                "select_metric": metric,
-            },
-        )
+        extra = {
+            "action_dim": action_dim,
+            "state_dim": state_dim,
+            "best_val": best_val,
+            "best_epoch": best_epoch,
+            "select_metric": metric,
+        }
+        if getattr(cfg.optim, "ckpt_mode", "all") == "resume":
+            # every epoch kept as weights only; the full state for resuming lives in one rolling file
+            save_checkpoint(path, model, cfg, epoch=epoch, step=global_step, extra=extra)
+            save_checkpoint(run_dir / "resume.pt", model, cfg, optimizer, scheduler,
+                            epoch=epoch, step=global_step, extra=extra)
+        else:
+            save_checkpoint(path, model, cfg, optimizer, scheduler, epoch=epoch, step=global_step, extra=extra)
         return path
 
     # -- loop ------------------------------------------------------------- #
@@ -236,6 +258,7 @@ def main(argv=None) -> None:
                 model, sigreg, train_loader, cfg, device, autocast,
                 optimizer=optimizer, scheduler=scheduler, logger=logger,
                 epoch=epoch, global_step=global_step, max_steps=cfg.optim.steps_per_epoch,
+                total_steps=total_steps,
             )
             logger.log({**train_stats, "epoch": epoch}, step=global_step, prefix="train_epoch/")
 

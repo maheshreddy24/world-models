@@ -8,9 +8,14 @@ Four parts:
     projector(s)    optional MLP heads after the encoder and after the predictor
 
 Prediction happens entirely in latent space; nothing is decoded back to
-pixels. What stops a trainable encoder from collapsing to a constant is the
-SIGReg term in `loss()`, which keeps the embedding distribution isotropic
-Gaussian. A frozen encoder (DINO-WM) cannot collapse, so it runs without it.
+pixels. What stops a trainable encoder from collapsing to a constant is either
+the SIGReg term in `loss()`, which keeps the embedding distribution isotropic
+Gaussian, or an EMA target (`ema=True`): the targets come from a slowly moving
+copy of encoder + projector with no gradient (BYOL / I-JEPA). A frozen encoder
+(DINO-WM) cannot collapse, so it runs with neither.
+
+With an EMA target, `encode()` (what rollouts, probe and decoder see) uses the
+target branch: the predictor's outputs live in that space.
 
 Shapes:
 
@@ -24,10 +29,13 @@ Latent step t is the frame at row t * frameskip; action t is the block of
 
 from __future__ import annotations
 
+import copy
+
 import torch
 from einops import rearrange
 from torch import nn
 
+from ..data.transforms import ImageTransform
 from .blocks import MLP
 from .encoder import build_encoder
 from .predictor import ActionEncoder, ARPredictor
@@ -57,6 +65,10 @@ class LeWM(nn.Module):
         obs_key: the batch key holding the observation.
         context_len: latent frames the predictor sees at inference (= data.history).
         freeze_encoder: no gradients for the encoder, and it always stays in eval mode.
+        ema: keep an EMA copy of encoder + projector as the prediction target
+            (updated by `update_target`).
+        pixel_transform: applied on the model's device to uint8 frames (B, T, H, W, 3),
+            as the training loader ships them; float input is taken as already transformed.
     """
 
     def __init__(
@@ -69,6 +81,8 @@ class LeWM(nn.Module):
         obs_key: str = "pixels",
         context_len: int = 3,
         freeze_encoder: bool = False,
+        ema: bool = False,
+        pixel_transform: ImageTransform | None = None,
     ):
         super().__init__()
         self.encoder = encoder
@@ -81,6 +95,11 @@ class LeWM(nn.Module):
         self.freeze_encoder = freeze_encoder
         if freeze_encoder:
             self.encoder.requires_grad_(False)
+        self.ema = ema
+        self.pixel_transform = pixel_transform
+        if ema:
+            self.target_encoder = copy.deepcopy(self.encoder).requires_grad_(False)
+            self.target_projector = copy.deepcopy(self.projector).requires_grad_(False)
 
     def train(self, mode: bool = True) -> "LeWM":
         super().train(mode)
@@ -91,12 +110,40 @@ class LeWM(nn.Module):
     # ------------------------------------------------------------------ #
     #  Building blocks
     # ------------------------------------------------------------------ #
-    def encode(self, obs: torch.Tensor) -> torch.Tensor:
-        """obs: (B, T, ...) -> (B, T, P, D)."""
+    def _encode_with(self, encoder: nn.Module, projector: nn.Module, obs: torch.Tensor) -> torch.Tensor:
         b = obs.size(0)
-        tokens = self.encoder(rearrange(obs.float(), "b t ... -> (b t) ..."))  # (B*T, P, D)
-        tokens = _per_token(self.projector, tokens)
+        x = rearrange(obs, "b t ... -> (b t) ...")
+        if obs.dtype == torch.uint8 and self.pixel_transform is not None:
+            x = self.pixel_transform(x)  # (B*T, H, W, 3) uint8 -> (B*T, 3, S, S)
+        tokens = encoder(x.float())  # (B*T, P, D)
+        tokens = _per_token(projector, tokens)
         return rearrange(tokens, "(b t) p d -> b t p d", b=b)
+
+    def encode_online(self, obs: torch.Tensor) -> torch.Tensor:
+        """obs: (B, T, ...) -> (B, T, P, D) through the trained encoder (the predictor's input in training)."""
+        return self._encode_with(self.encoder, self.projector, obs)
+
+    def encode_target(self, obs: torch.Tensor) -> torch.Tensor:
+        """obs: (B, T, ...) -> (B, T, P, D) in the space the predictor predicts (the EMA branch, if any)."""
+        if not self.ema:
+            return self.encode_online(obs)
+        with torch.no_grad():
+            return self._encode_with(self.target_encoder, self.target_projector, obs)
+
+    def encode(self, obs: torch.Tensor) -> torch.Tensor:
+        """obs: (B, T, ...) -> (B, T, P, D), the latent used at inference."""
+        return self.encode_target(obs)
+
+    @torch.no_grad()
+    def update_target(self, momentum: float) -> None:
+        """target <- momentum * target + (1 - momentum) * online; buffers (BatchNorm stats) copied."""
+        if not self.ema:
+            return
+        for online, target in ((self.encoder, self.target_encoder), (self.projector, self.target_projector)):
+            for po, pt in zip(online.parameters(), target.parameters()):
+                pt.lerp_(po.detach(), 1.0 - momentum)
+            for bo, bt in zip(online.buffers(), target.buffers()):
+                bt.copy_(bo)
 
     def encode_action(self, action: torch.Tensor) -> torch.Tensor:
         """action: (B, T, A) -> (B, T, D). NaNs become zeros."""
@@ -112,30 +159,37 @@ class LeWM(nn.Module):
     # ------------------------------------------------------------------ #
     #  Training
     # ------------------------------------------------------------------ #
-    def loss(self, batch: dict, sigreg: SIGReg | None = None, sigreg_weight: float = 0.0) -> dict:
-        """Teacher-forced next-embedding prediction, plus SIGReg when one is given.
+    def loss(self, batch: dict, sigreg: nn.Module | None = None, sigreg_weight: float = 0.0,
+             pred_weight: float = 1.0) -> dict:
+        """Teacher-forced next-embedding prediction, plus SIGReg (or another regulariser) when one is given.
+
+        loss = pred_weight * pred_loss + sigreg_weight * regulariser; `pred_weight` < 1 is
+        VISReg's convex form, (1 - lambda) * pred + lambda * reg.
 
         A sequence of T steps gives T - 1 supervised predictions in one pass.
+        With an EMA target, the predictor reads the online embeddings and
+        predicts the (gradient-free) EMA ones.
         """
-        emb = self.encode(batch[self.obs_key])  # (B, T, P, D)
+        emb = self.encode_online(batch[self.obs_key])  # (B, T, P, D)
         act_emb = self.encode_action(batch["action"])  # (B, T, D)
 
         pred = self.predict(emb[:, :-1], act_emb[:, :-1])
-        target = emb[:, 1:]
+        target_emb = self.encode_target(batch[self.obs_key]) if self.ema else emb
+        target = target_emb[:, 1:]
         pred_loss = (pred - target).pow(2).mean()
         out = {"loss": pred_loss, "pred_loss": pred_loss.detach()}
 
         if sigreg is not None:
             # (T, B*P, D): each timestep's token distribution is tested against N(0, I)
             sigreg_loss = sigreg(rearrange(emb, "b t p d -> t (b p) d"))
-            out["loss"] = pred_loss + sigreg_weight * sigreg_loss
+            out["loss"] = pred_weight * pred_loss + sigreg_weight * sigreg_loss
             out["sigreg_loss"] = sigreg_loss.detach()
 
         with torch.no_grad():
             out["emb_std"] = emb.std(dim=(0, 1, 2)).mean()  # heads to 0 on collapse
             out["emb_norm"] = emb.norm(dim=-1).mean()
             # < 1: the predictor beats "nothing moves"
-            static = (emb[:, :-1] - target).pow(2).mean()
+            static = (target_emb[:, :-1] - target).pow(2).mean()
             out["pred_vs_static"] = pred_loss / static.clamp_min(1e-8)
         return out
 
@@ -194,6 +248,7 @@ def build_model(cfg, action_dim: int, state_dim: int | None = None) -> LeWM:
         dim_head=mcfg.dim_head,
         mlp_dim=mcfg.mlp_dim,
         dropout=mcfg.dropout,
+        pos_init_std=getattr(mcfg, "pos_init_std", 0.02),
     )
 
     def head():
@@ -208,4 +263,6 @@ def build_model(cfg, action_dim: int, state_dim: int | None = None) -> LeWM:
         obs_key=cfg.data.obs_key,
         context_len=cfg.data.history,
         freeze_encoder=mcfg.freeze_encoder,
+        ema=cfg.loss.ema,
+        pixel_transform=ImageTransform(cfg.data.img_size) if cfg.data.obs_key == "pixels" else None,
     )

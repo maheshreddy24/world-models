@@ -1,8 +1,9 @@
 """Pixel preprocessing.
 
-uint8 HWC frames -> ImageNet-normalised float CHW tensors. The dataloader
-workers and every analysis script use the same function, so preprocessing never
-differs between training and evaluation.
+uint8 HWC frames -> ImageNet-normalised float CHW tensors. Training applies it
+on the GPU inside the model (the loader ships uint8, 4x smaller than float), the
+analysis scripts before encoding; it is the same function either way, so
+preprocessing never differs between training and evaluation.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class ImageTransform:
         x = x.permute(0, 3, 1, 2).float().div_(255.0)  # (N, 3, H, W)
         if x.shape[-1] != self.size or x.shape[-2] != self.size:
             x = F.interpolate(x, size=(self.size, self.size), mode="bilinear", align_corners=False)
-        return (x - self.mean) / self.std
+        return (x - self.mean.to(x.device)) / self.std.to(x.device)
 
     def denormalize(self, x: torch.Tensor) -> torch.Tensor:
         """Back to uint8 (N, H, W, 3) — for videos and debugging."""

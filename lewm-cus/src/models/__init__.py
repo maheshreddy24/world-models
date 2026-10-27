@@ -4,6 +4,7 @@ from .blocks import MLP, Attention, Block, ConditionalBlock, FeedForward, Transf
 from .encoder import DinoEncoder, StateEncoder, ViTEncoder, build_encoder
 from .lewm import LeWM, build_model, latent_sq_dist
 from .predictor import ActionEncoder, ARPredictor, frame_causal_mask
+from .regularizers import SubspaceSIGReg, VISReg, build_regularizer
 from .sigreg import SIGReg
 
 __all__ = [
@@ -11,5 +12,5 @@ __all__ = [
     "DinoEncoder", "StateEncoder", "ViTEncoder", "build_encoder",
     "LeWM", "build_model", "latent_sq_dist",
     "ActionEncoder", "ARPredictor", "frame_causal_mask",
-    "SIGReg",
+    "SIGReg", "SubspaceSIGReg", "VISReg", "build_regularizer",
 ]
